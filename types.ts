@@ -6,6 +6,7 @@ export interface SoulState {
   medo: number;
   confusão: number;
   perguntas: string[];
+  visual_cue?: string;
 }
 
 export interface Message {
@@ -36,6 +37,14 @@ export interface MemorySummary {
   summary: string;
   interactionCount: number;
   timestamp: number;
+}
+
+export interface SystemLog {
+  id: string;
+  timestamp: number;
+  type: 'info' | 'error' | 'warn' | 'success';
+  message: string;
+  context?: string;
 }
 
 export interface AppState {
