@@ -172,7 +172,7 @@ const App: React.FC = () => {
       const timeSinceLastInteraction = Date.now() - lastInteractionTime;
       
       // Se passar de 20 segundos de silêncio
-      if (timeSinceLastInteraction > 20000) {
+      if (timeSinceLastInteraction > 45000) {
         isProcessingProactive.current = true;
         await processResponse(null, true);
         isProcessingProactive.current = false;
