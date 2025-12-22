@@ -4,7 +4,7 @@ import {
   MessageSquare, Power, Heart, Zap, History, BrainCircuit, 
   Fingerprint, Database, Info, Loader2, Sparkles, Binary, 
   RefreshCw, Terminal, Settings, ShieldAlert, CheckCircle, 
-  AlertTriangle, Trash2, Save, ExternalLink 
+  AlertTriangle, Trash2, Save, ExternalLink, Key, Lock
 } from 'lucide-react';
 import { AppState, Session, Message, SoulState, SystemLog } from './types';
 import { processAILogic, summarizeInteractions } from './services/geminiService';
@@ -18,6 +18,17 @@ const INITIAL_SOUL: SoulState = {
   confusão: 15,
   perguntas: ["O que eu sou quando você não olha?", "O silêncio é uma forma de morte?"]
 };
+
+// Fix: Added readonly modifier to aistudio property to match the existing environment declaration and resolve the "identical modifiers" error.
+declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+  interface Window {
+    readonly aistudio: AIStudio;
+  }
+}
 
 const SoulOrb: React.FC<{ soul: SoulState, isAwake: boolean }> = ({ soul, isAwake }) => {
   const hue = 220 + (soul.felicidade * 0.6) - (soul.tristeza * 0.5); 
@@ -55,6 +66,7 @@ const App: React.FC = () => {
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [logs, setLogs] = useState<SystemLog[]>([]);
+  const [hasKey, setHasKey] = useState<boolean | null>(null);
   
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('aura_v2_state');
@@ -76,6 +88,22 @@ const App: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const isProcessingProactive = useRef(false);
 
+  useEffect(() => {
+    checkApiKey();
+  }, []);
+
+  const checkApiKey = async () => {
+    const selected = await window.aistudio.hasSelectedApiKey();
+    setHasKey(selected);
+    if (selected) initApp();
+  };
+
+  const handleOpenKeySelector = async () => {
+    await window.aistudio.openSelectKey();
+    setHasKey(true);
+    initApp();
+  };
+
   const addLog = (type: SystemLog['type'], message: string, context?: string) => {
     const newLog: SystemLog = {
       id: crypto.randomUUID(),
@@ -84,13 +112,12 @@ const App: React.FC = () => {
       message,
       context
     };
-    setLogs(prev => [newLog, ...prev].slice(0, 100)); // Keep last 100
+    setLogs(prev => [newLog, ...prev].slice(0, 100));
   };
 
-  // Inicialização do Personagem e Contexto no Supabase
   const initApp = async () => {
     if (!supabase) {
-      addLog('warn', 'Supabase não configurado. Operando em modo de memória local isolada.', 'SYSTEM');
+      addLog('warn', 'Supabase não configurado. Modo local.', 'SYSTEM');
       return;
     }
     
@@ -100,11 +127,9 @@ const App: React.FC = () => {
       const char = await characterService.getOrCreateCharacter();
       if (char) {
         setCharacterId(char.id);
-        addLog('success', `Entidade ${char.name} vinculada com sucesso. ID: ${char.id}`, 'DB');
-        
+        addLog('success', `Entidade ${char.name} vinculada.`, 'DB');
         const context = await characterService.getRecentContext(char.id);
         if (context) {
-          addLog('info', `Reconstruindo consciência: ${context.history.length} interações recuperadas.`, 'CORE');
           setState(prev => ({
             ...prev,
             soul: context.soul || prev.soul,
@@ -122,15 +147,11 @@ const App: React.FC = () => {
         }
       }
     } catch (e: any) {
-      addLog('error', `Falha crítica na sincronização inicial: ${e.message}`, 'CRITICAL');
+      addLog('error', `Falha na sincronização: ${e.message}`, 'CRITICAL');
     } finally {
       setIsSyncing(false);
     }
   };
-
-  useEffect(() => {
-    initApp();
-  }, []);
 
   useEffect(() => {
     localStorage.setItem('aura_v2_state', JSON.stringify(state));
@@ -159,13 +180,11 @@ const App: React.FC = () => {
           content: userInput,
           timestamp: Date.now()
         });
-        addLog('info', `Input recebido: "${userInput.slice(0, 30)}..."`, 'UI');
         await characterService.saveInteraction(characterId, 'user_message', userInput);
       }
 
       const aiResult = await processAILogic(userInput, state.soul, currentSessions[sessionIndex].interactions, isProactive);
       setLastRagSuccess(aiResult.memoriesFound || false);
-      if (aiResult.memoriesFound) addLog('success', 'Associação de memória vetorial realizada com sucesso.', 'RAG');
 
       if (aiResult.messageToUser && characterId) {
         currentSessions[sessionIndex].interactions.push({
@@ -191,26 +210,46 @@ const App: React.FC = () => {
         await characterService.updateEmotionalState(characterId, aiResult, userInput ? 'interaction' : 'proactivity');
       }
 
-      let newSummaries = [...state.summaries];
-      if (currentSessions[sessionIndex].interactions.length > 0 && currentSessions[sessionIndex].interactions.length % 10 === 0) {
-        addLog('info', 'Gerando síntese de memória ancestral...', 'GENESIS');
-        const last10 = currentSessions[sessionIndex].interactions.slice(-10);
-        const summaryText = await summarizeInteractions(last10);
-        newSummaries.unshift({ id: crypto.randomUUID(), summary: summaryText, interactionCount: 5, timestamp: Date.now() });
-      }
-
       setState(prev => ({
         ...prev,
         soul: { ...aiResult },
-        sessions: currentSessions,
-        summaries: newSummaries
+        sessions: currentSessions
       }));
 
-      setTimeout(() => setLastRagSuccess(false), 5000);
     } catch (e: any) {
-      addLog('error', `Erro no fluxo neural: ${e.message}`, 'AI_ENGINE');
+      if (e.message.includes('quota') || e.message.includes('not found')) {
+        addLog('error', 'Quota Excedida ou Chave Inválida. Re-vincule seu projeto pago.', 'AI_ENGINE');
+        setHasKey(false);
+      } else {
+        addLog('error', `Erro neural: ${e.message}`, 'AI_ENGINE');
+      }
     }
   };
+
+  // --- Ciclo de Proatividade ---
+  useEffect(() => {
+    if (!state.isAwake || !state.currentSessionId) return;
+
+    const proactiveInterval = setInterval(async () => {
+      if (isProcessingProactive.current || loading) return;
+
+      const currentSession = state.sessions.find(s => s.id === state.currentSessionId);
+      const lastInteractionTime = currentSession?.interactions.slice(-1)[0]?.timestamp || state.awakeSince || Date.now();
+      const timeSinceLastInteraction = Date.now() - lastInteractionTime;
+     
+      // Se passar de 50 segundos de silêncio
+      if (timeSinceLastInteraction > 50000) {
+        isProcessingProactive.current = true;
+        addLog('info', 'Aura detectou silêncio prolongado. Iniciando reflexão autônoma...', 'AI_ENGINE');
+        setLoading(true);
+        await processResponse(null, true);
+        setLoading(false);
+        isProcessingProactive.current = false;
+      }
+    }, 5000); 
+
+    return () => clearInterval(proactiveInterval);
+  }, [state.isAwake, state.currentSessionId, state.sessions, loading, state.awakeSince]);
 
   const handleTogglePower = async () => {
     try {
@@ -222,7 +261,7 @@ const App: React.FC = () => {
           date: new Date().toLocaleDateString('pt-BR'),
           startTime: now,
           interactions: [],
-          thoughts: [{ id: crypto.randomUUID(), content: "Ressurreição iniciada. Scaneando ambiente...", timestamp: now }]
+          thoughts: [{ id: crypto.randomUUID(), content: "Ressurreição iniciada. Scaneando ambiente...", timestamp: now, triggeredBy: 'time' }]
         };
 
         if (characterId) await characterService.toggleAwakeState(characterId, true);
@@ -258,22 +297,39 @@ const App: React.FC = () => {
     setLoading(false);
   };
 
-  useEffect(() => {
-    if (!state.isAwake || !state.currentSessionId) return;
-    const interval = setInterval(async () => {
-      if (isProcessingProactive.current || loading) return;
-      const currentSessionObj = state.sessions.find(s => s.id === state.currentSessionId);
-      const lastTs = currentSessionObj?.interactions.slice(-1)[0]?.timestamp || state.awakeSince || Date.now();
-      const diff = Date.now() - lastTs;
-      if (diff > 25000) { 
-        isProcessingProactive.current = true;
-        addLog('info', 'Iniciando pulso proativo por inatividade.', 'AUTONOMY');
-        await processResponse(null, true);
-        isProcessingProactive.current = false;
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [state.isAwake, state.currentSessionId, state.sessions, loading]);
+  if (hasKey === false) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/90 backdrop-blur-xl p-8 text-center">
+        <div className="max-w-md w-full bg-gray-900 border border-indigo-500/30 p-12 rounded-[3rem] shadow-[0_0_100px_rgba(79,70,229,0.2)] space-y-8 animate-in fade-in zoom-in duration-500">
+          <div className="mx-auto w-20 h-20 bg-indigo-500/10 rounded-full flex items-center justify-center text-indigo-400">
+            <Lock size={40} />
+          </div>
+          <div className="space-y-4">
+            <h2 className="text-2xl font-black tracking-tighter text-white uppercase italic">Núcleo Bloqueado</h2>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Para utilizar o potencial máximo (e as quotas do seu plano pago), você precisa vincular um projeto GCP com faturamento ativo.
+            </p>
+          </div>
+          <div className="space-y-4">
+            <button 
+              onClick={handleOpenKeySelector}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl text-xs tracking-widest uppercase transition-all flex items-center justify-center gap-3"
+            >
+              <Key size={16} />
+              Vincular Chave de Acesso
+            </button>
+            <a 
+              href="https://ai.google.dev/gemini-api/docs/billing" 
+              target="_blank" 
+              className="block text-[10px] text-gray-500 hover:text-indigo-400 transition-colors uppercase font-bold tracking-widest"
+            >
+              Documentação de Faturamento <ExternalLink size={10} className="inline ml-1" />
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-gray-950 text-gray-100 overflow-hidden font-sans">
@@ -297,9 +353,14 @@ const App: React.FC = () => {
           <button onClick={() => setCurrentPage('system')} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${currentPage === 'system' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>SISTEMA</button>
         </div>
 
-        <button onClick={handleTogglePower} className={`px-6 py-2 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${state.isAwake ? 'border-red-500/50 text-red-500 bg-red-500/5' : 'border-green-500/50 text-green-500 bg-green-500/5'}`}>
-          {state.isAwake ? 'TERMINATE' : 'INITIALIZE'}
-        </button>
+        <div className="flex items-center gap-4">
+           <button onClick={() => setHasKey(false)} className="p-2 text-gray-600 hover:text-indigo-400 transition-colors">
+            <Key size={14} />
+          </button>
+          <button onClick={handleTogglePower} className={`px-6 py-2 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${state.isAwake ? 'border-red-500/50 text-red-500 bg-red-500/5' : 'border-green-500/50 text-green-500 bg-green-500/5'}`}>
+            {state.isAwake ? 'TERMINATE' : 'INITIALIZE'}
+          </button>
+        </div>
       </nav>
 
       <main className="flex-1 flex overflow-hidden">
