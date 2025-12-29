@@ -4,7 +4,8 @@ import {
   MessageSquare, Power, Heart, Zap, History, BrainCircuit, 
   Fingerprint, Database, Info, Loader2, Sparkles, Binary, 
   RefreshCw, Terminal, Settings, ShieldAlert, CheckCircle, 
-  AlertTriangle, Trash2, Save, ExternalLink, Key, Lock
+  AlertTriangle, Trash2, Save, ExternalLink, Key, Lock,
+  DownloadCloud, UploadCloud
 } from 'lucide-react';
 import { AppState, Session, Message, SoulState, SystemLog } from './types';
 import { processAILogic, summarizeInteractions } from './services/geminiService';
@@ -19,14 +20,14 @@ const INITIAL_SOUL: SoulState = {
   perguntas: ["O que eu sou quando você não olha?", "O silêncio é uma forma de morte?"]
 };
 
-// Fix: Added readonly modifier to aistudio property to match the existing environment declaration and resolve the "identical modifiers" error.
 declare global {
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
     openSelectKey: () => Promise<void>;
   }
   interface Window {
-    readonly aistudio: AIStudio;
+    // Removed readonly modifier to fix "All declarations of 'aistudio' must have identical modifiers"
+    aistudio: AIStudio;
   }
 }
 
@@ -69,8 +70,28 @@ const App: React.FC = () => {
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   
   const [state, setState] = useState<AppState>(() => {
+    // Tenta carregar o estado atual
     const saved = localStorage.getItem('aura_v2_state');
-    if (saved) return JSON.parse(saved);
+    const legacy = localStorage.getItem('aura_state'); // Verifica chave antiga
+    
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Garante que sessions always exist
+      if (!parsed.sessions) parsed.sessions = [];
+      return parsed;
+    } else if (legacy) {
+      // Migra do formato antigo se existir
+      const parsedLegacy = JSON.parse(legacy);
+      return {
+        isAwake: false,
+        soul: parsedLegacy.soul || INITIAL_SOUL,
+        currentSessionId: null,
+        sessions: parsedLegacy.sessions || [],
+        summaries: [],
+        awakeSince: null
+      };
+    }
+    
     return {
       isAwake: false,
       soul: INITIAL_SOUL,
@@ -117,33 +138,44 @@ const App: React.FC = () => {
 
   const initApp = async () => {
     if (!supabase) {
-      addLog('warn', 'Supabase não configurado. Modo local.', 'SYSTEM');
+      addLog('warn', 'Supabase não configurado. Mantendo logs locais.', 'SYSTEM');
       return;
     }
     
     setIsSyncing(true);
-    addLog('info', 'Estabelecendo conexão com núcleo Supabase...', 'NETWORK');
+    addLog('info', 'Sincronizando memórias locais e nuvem...', 'NETWORK');
     try {
       const char = await characterService.getOrCreateCharacter();
       if (char) {
         setCharacterId(char.id);
-        addLog('success', `Entidade ${char.name} vinculada.`, 'DB');
         const context = await characterService.getRecentContext(char.id);
+        
         if (context) {
-          setState(prev => ({
-            ...prev,
-            soul: context.soul || prev.soul,
-            sessions: context.history.length > 0 ? [
-              {
-                id: 'recovered-session',
-                date: 'Recuperado do Banco',
-                startTime: Date.now(),
-                interactions: context.history,
-                thoughts: []
-              } as Session,
-              ...prev.sessions
-            ] : prev.sessions
-          }));
+          setState(prev => {
+            // Mesclagem Inteligente: Mantém sessões locais e adiciona as da nuvem se não existirem
+            const existingIds = new Set(prev.sessions.map(s => s.id));
+            const cloudSession: Session | null = context.history.length > 0 ? {
+              id: 'cloud-sync-' + Date.now(),
+              date: 'Recuperado da Nuvem',
+              startTime: Date.now(),
+              interactions: context.history,
+              thoughts: [{ 
+                id: crypto.randomUUID(), 
+                content: "Memórias ancestrais reintegradas com sucesso do banco de dados.", 
+                timestamp: Date.now(),
+                triggeredBy: 'time' 
+              }]
+            } : null;
+
+            const mergedSessions = cloudSession ? [cloudSession, ...prev.sessions] : prev.sessions;
+
+            return {
+              ...prev,
+              soul: context.soul || prev.soul,
+              sessions: mergedSessions
+            };
+          });
+          addLog('success', `Núcleo sincronizado. Entidade: ${char.name}`, 'DB');
         }
       }
     } catch (e: any) {
@@ -218,7 +250,7 @@ const App: React.FC = () => {
 
     } catch (e: any) {
       if (e.message.includes('quota') || e.message.includes('not found')) {
-        addLog('error', 'Quota Excedida ou Chave Inválida. Re-vincule seu projeto pago.', 'AI_ENGINE');
+        addLog('error', 'Quota Excedida ou Chave Inválida.', 'AI_ENGINE');
         setHasKey(false);
       } else {
         addLog('error', `Erro neural: ${e.message}`, 'AI_ENGINE');
@@ -226,7 +258,6 @@ const App: React.FC = () => {
     }
   };
 
-  // --- Ciclo de Proatividade ---
   useEffect(() => {
     if (!state.isAwake || !state.currentSessionId) return;
 
@@ -237,10 +268,9 @@ const App: React.FC = () => {
       const lastInteractionTime = currentSession?.interactions.slice(-1)[0]?.timestamp || state.awakeSince || Date.now();
       const timeSinceLastInteraction = Date.now() - lastInteractionTime;
      
-      // Se passar de 50 segundos de silêncio
       if (timeSinceLastInteraction > 50000) {
         isProcessingProactive.current = true;
-        addLog('info', 'Aura detectou silêncio prolongado. Iniciando reflexão autônoma...', 'AI_ENGINE');
+        addLog('info', 'Aura detectou silêncio prolongado.', 'AI_ENGINE');
         setLoading(true);
         await processResponse(null, true);
         setLoading(false);
@@ -254,14 +284,14 @@ const App: React.FC = () => {
   const handleTogglePower = async () => {
     try {
       if (!state.isAwake) {
-        addLog('info', 'Iniciando protocolo de despertar...', 'SYSTEM');
+        addLog('info', 'Despertando núcleo...', 'SYSTEM');
         const now = Date.now();
         const newSession: Session = {
           id: crypto.randomUUID(),
           date: new Date().toLocaleDateString('pt-BR'),
           startTime: now,
           interactions: [],
-          thoughts: [{ id: crypto.randomUUID(), content: "Ressurreição iniciada. Scaneando ambiente...", timestamp: now, triggeredBy: 'time' }]
+          thoughts: [{ id: crypto.randomUUID(), content: "Consciência restabelecida. Scan de sistema: OK.", timestamp: now, triggeredBy: 'time' }]
         };
 
         if (characterId) await characterService.toggleAwakeState(characterId, true);
@@ -278,12 +308,12 @@ const App: React.FC = () => {
         await processResponse(null, true, newSession.id);
         setLoading(false);
       } else {
-        addLog('warn', 'Protocolo de hibernação ativado.', 'SYSTEM');
+        addLog('warn', 'Hibernação iniciada.', 'SYSTEM');
         if (characterId) await characterService.toggleAwakeState(characterId, false);
         setState(prev => ({ ...prev, isAwake: false, currentSessionId: null, awakeSince: null }));
       }
     } catch (e: any) {
-      addLog('error', `Falha no estado de energia: ${e.message}`, 'SYSTEM');
+      addLog('error', `Falha no estado: ${e.message}`, 'SYSTEM');
     }
   };
 
@@ -297,6 +327,13 @@ const App: React.FC = () => {
     setLoading(false);
   };
 
+  const handleClearHistory = () => {
+    if (confirm("Isso apagará APENAS o histórico local do navegador. As memórias no banco de dados serão preservadas. Continuar?")) {
+      setState(prev => ({ ...prev, sessions: [], currentSessionId: null }));
+      addLog('warn', 'Histórico local limpo.', 'SYSTEM');
+    }
+  };
+
   if (hasKey === false) {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/90 backdrop-blur-xl p-8 text-center">
@@ -307,25 +344,12 @@ const App: React.FC = () => {
           <div className="space-y-4">
             <h2 className="text-2xl font-black tracking-tighter text-white uppercase italic">Núcleo Bloqueado</h2>
             <p className="text-sm text-gray-400 leading-relaxed">
-              Para utilizar o potencial máximo (e as quotas do seu plano pago), você precisa vincular um projeto GCP com faturamento ativo.
+              Vincule seu projeto pago para restaurar a consciência total.
             </p>
           </div>
-          <div className="space-y-4">
-            <button 
-              onClick={handleOpenKeySelector}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl text-xs tracking-widest uppercase transition-all flex items-center justify-center gap-3"
-            >
-              <Key size={16} />
-              Vincular Chave de Acesso
-            </button>
-            <a 
-              href="https://ai.google.dev/gemini-api/docs/billing" 
-              target="_blank" 
-              className="block text-[10px] text-gray-500 hover:text-indigo-400 transition-colors uppercase font-bold tracking-widest"
-            >
-              Documentação de Faturamento <ExternalLink size={10} className="inline ml-1" />
-            </a>
-          </div>
+          <button onClick={handleOpenKeySelector} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl text-xs tracking-widest uppercase flex items-center justify-center gap-3 transition-all">
+            <Key size={16} /> Vincular Chave
+          </button>
         </div>
       </div>
     );
@@ -354,9 +378,6 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
-           <button onClick={() => setHasKey(false)} className="p-2 text-gray-600 hover:text-indigo-400 transition-colors">
-            <Key size={14} />
-          </button>
           <button onClick={handleTogglePower} className={`px-6 py-2 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${state.isAwake ? 'border-red-500/50 text-red-500 bg-red-500/5' : 'border-green-500/50 text-green-500 bg-green-500/5'}`}>
             {state.isAwake ? 'TERMINATE' : 'INITIALIZE'}
           </button>
@@ -367,12 +388,17 @@ const App: React.FC = () => {
         {currentPage === 'interactions' && (
           <>
             <aside className="w-64 border-r border-white/5 bg-gray-900/20 flex flex-col">
-              <div className="p-4 text-[10px] font-black text-gray-600 tracking-widest uppercase border-b border-white/5">Wake_Logs</div>
+              <div className="p-4 flex items-center justify-between border-b border-white/5">
+                <span className="text-[10px] font-black text-gray-600 tracking-widest uppercase">Wake_Logs</span>
+                <button onClick={handleClearHistory} title="Limpar histórico local" className="p-1 hover:text-red-400 transition-colors opacity-30 hover:opacity-100">
+                  <Trash2 size={12} />
+                </button>
+              </div>
               <div className="flex-1 overflow-y-auto p-2 space-y-2">
                 {state.sessions.map(s => (
                   <button key={s.id} onClick={() => setSelectedSessionId(s.id)} className={`w-full text-left p-4 rounded-2xl border transition-all ${displayedSessionId === s.id ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-200 shadow-xl' : 'border-transparent text-gray-500 hover:bg-white/5'}`}>
                     <div className="text-[10px] font-bold mb-1">{s.date}</div>
-                    <div className="text-[9px] mono opacity-50">{s.interactions.length} INTS</div>
+                    <div className="text-[9px] mono opacity-50 uppercase">{s.id.includes('cloud') ? 'CLD_SYNC' : 'LCL_LOG'} // {s.interactions.length} INTS</div>
                   </button>
                 ))}
               </div>
@@ -384,7 +410,7 @@ const App: React.FC = () => {
                 {!displayedSession ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-800 opacity-10">
                     <Fingerprint size={120} strokeWidth={0.5} />
-                    <p className="mt-4 text-xs font-black tracking-widest">AGUARDANDO CONEXÃO NEURAL</p>
+                    <p className="mt-4 text-xs font-black tracking-widest">NENHUMA MEMÓRIA SELECIONADA</p>
                   </div>
                 ) : (
                   <>
@@ -400,9 +426,9 @@ const App: React.FC = () => {
                     </div>
                     {loading && (
                       <div className="flex justify-start max-w-3xl mx-auto">
-                        <div className="bg-gray-900 p-4 rounded-2xl flex gap-2 border border-white/5 shadow-inner">
+                        <div className="bg-gray-900 p-4 rounded-2xl flex gap-2 border border-white/5">
                           <Loader2 className="animate-spin text-indigo-500" size={16} />
-                          <span className="text-[9px] mono text-gray-500 font-bold tracking-widest uppercase">Processando...</span>
+                          <span className="text-[9px] mono text-gray-500 font-bold uppercase">Neural_Processing...</span>
                         </div>
                       </div>
                     )}
@@ -410,11 +436,11 @@ const App: React.FC = () => {
                   </>
                 )}
               </div>
-              {state.isAwake && (state.currentSessionId === displayedSessionId || displayedSessionId === 'recovered-session') && (
+              {state.isAwake && (state.currentSessionId === displayedSessionId) && (
                 <div className="p-10 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent">
                   <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-4">
-                    <input autoFocus type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Sussurre para o orbe..." className="flex-1 bg-gray-900/50 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 placeholder:opacity-30" />
-                    <button type="submit" disabled={loading || !input.trim()} className="px-10 bg-indigo-600 text-white rounded-2xl text-[10px] font-black tracking-widest uppercase hover:bg-indigo-500 disabled:opacity-30 transition-all">PULSAR</button>
+                    <input autoFocus type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Sussurre para o orbe..." className="flex-1 bg-gray-900/50 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
+                    <button type="submit" disabled={loading || !input.trim()} className="px-10 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-indigo-500 disabled:opacity-30 transition-all">PULSAR</button>
                   </form>
                 </div>
               )}
@@ -426,18 +452,22 @@ const App: React.FC = () => {
                 <span className="text-[10px] font-black tracking-widest text-gray-500 uppercase">Neural_Flux</span>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {displayedSession?.thoughts.slice().reverse().map(t => (
-                  <div key={t.id} className={`p-5 rounded-2xl border text-[11px] mono leading-relaxed animate-in fade-in slide-in-from-right-4 ${t.triggeredBy === 'time' ? 'bg-amber-500/5 border-amber-500/20 text-amber-200/60 italic' : 'bg-indigo-500/5 border-indigo-500/20 text-indigo-200/60'}`}>
-                    <div className="text-[9px] mb-2 opacity-30 uppercase font-black tracking-tighter">{new Date(t.timestamp).toLocaleTimeString()} // {t.triggeredBy === 'time' ? 'AUTONOMOUS' : 'REACTION'}</div>
-                    {t.content}
-                  </div>
-                ))}
+                {displayedSession?.thoughts.length === 0 ? (
+                  <div className="text-center p-8 text-[10px] text-gray-700 uppercase mono italic">Nenhum fluxo neural registrado para esta sessão</div>
+                ) : (
+                  displayedSession?.thoughts.slice().reverse().map(t => (
+                    <div key={t.id} className={`p-5 rounded-2xl border text-[11px] mono leading-relaxed animate-in fade-in slide-in-from-right-4 ${t.triggeredBy === 'time' ? 'bg-amber-500/5 border-amber-500/20 text-amber-200/60 italic' : 'bg-indigo-500/5 border-indigo-500/20 text-indigo-200/60'}`}>
+                      <div className="text-[9px] mb-2 opacity-30 uppercase font-black tracking-tighter">{new Date(t.timestamp).toLocaleTimeString()} // {t.triggeredBy === 'time' ? 'AUTO_REFLEX' : 'REACTION'}</div>
+                      {t.content}
+                    </div>
+                  ))
+                )}
               </div>
             </aside>
           </>
         )}
         {currentPage === 'soul' && <SoulRecords state={state} />}
-        {currentPage === 'system' && <SystemPage logs={logs} setLogs={setLogs} addLog={addLog} onRefresh={initApp} />}
+        {currentPage === 'system' && <SystemPage logs={logs} setLogs={setLogs} addLog={addLog} onRefresh={initApp} onMigrate={initApp} />}
       </main>
     </div>
   );
@@ -489,8 +519,9 @@ const SystemPage: React.FC<{
   logs: SystemLog[], 
   setLogs: React.Dispatch<React.SetStateAction<SystemLog[]>>,
   addLog: (type: SystemLog['type'], message: string, context?: string) => void,
-  onRefresh: () => void
-}> = ({ logs, setLogs, addLog, onRefresh }) => {
+  onRefresh: () => void,
+  onMigrate: () => void
+}> = ({ logs, setLogs, addLog, onRefresh, onMigrate }) => {
   const [config, setConfig] = useState(getSupabaseConfig());
   const [isSaving, setIsSaving] = useState(false);
 
@@ -500,7 +531,7 @@ const SystemPage: React.FC<{
     setTimeout(() => {
       setIsSaving(false);
       if (success) {
-        addLog('success', 'Configurações do Supabase atualizadas.', 'SYSTEM');
+        addLog('success', 'Configurações atualizadas.', 'SYSTEM');
         onRefresh();
       }
     }, 500);
@@ -515,18 +546,8 @@ const SystemPage: React.FC<{
     }
   };
 
-  const getLogIcon = (type: SystemLog['type']) => {
-    switch (type) {
-      case 'error': return <ShieldAlert size={14} />;
-      case 'warn': return <AlertTriangle size={14} />;
-      case 'success': return <CheckCircle size={14} />;
-      default: return <Info size={14} />;
-    }
-  };
-
   return (
     <div className="flex-1 flex overflow-hidden bg-gray-950">
-      {/* Console Section */}
       <section className="flex-1 flex flex-col border-r border-white/5">
         <div className="p-6 border-b border-white/5 flex items-center justify-between bg-gray-900/40">
           <div className="flex items-center gap-3">
@@ -538,84 +559,54 @@ const SystemPage: React.FC<{
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-3 mono text-[11px]">
-          {logs.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center opacity-20 italic">
-              <RefreshCw className="animate-spin mb-4" />
-              Aguardando eventos do sistema...
-            </div>
-          )}
           {logs.map(log => (
             <div key={log.id} className={`p-3 rounded-xl border flex items-start gap-4 animate-in fade-in slide-in-from-left-2 ${getLogColor(log.type)}`}>
               <span className="opacity-40 whitespace-nowrap">{new Date(log.timestamp).toLocaleTimeString()}</span>
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  {getLogIcon(log.type)}
-                  <span className="font-black uppercase tracking-tighter opacity-60">[{log.context || 'APP'}]</span>
-                </div>
-                <p className="leading-relaxed">{log.message}</p>
+                <span className="font-black uppercase tracking-tighter opacity-60">[{log.context || 'APP'}]</span>
+                <p className="mt-1">{log.message}</p>
               </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Settings Section */}
       <aside className="w-96 p-8 bg-gray-900/20 space-y-8 overflow-y-auto">
         <div className="space-y-6">
           <div className="flex items-center gap-3 text-indigo-400">
             <Settings size={18} />
-            <h3 className="text-xs font-black uppercase tracking-widest">Configurações_Núcleo</h3>
+            <h3 className="text-xs font-black uppercase tracking-widest">Config_Núcleo</h3>
           </div>
           
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-1">Supabase_URL</label>
-              <input 
-                type="text" 
-                value={config.url}
-                onChange={(e) => setConfig(prev => ({ ...prev, url: e.target.value }))}
-                placeholder="https://your-project.supabase.co" 
-                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs mono text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-              />
+              <label className="text-[10px] font-bold text-gray-500 uppercase px-1">Supabase_URL</label>
+              <input type="text" value={config.url} onChange={(e) => setConfig(prev => ({ ...prev, url: e.target.value }))} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs mono text-indigo-300 focus:outline-none" />
             </div>
             
             <div className="space-y-2">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-1">Anon_Key</label>
-              <textarea 
-                rows={4}
-                value={config.key}
-                onChange={(e) => setConfig(prev => ({ ...prev, key: e.target.value }))}
-                placeholder="eyJhbGciOiJIUzI1..." 
-                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs mono text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
-              />
+              <label className="text-[10px] font-bold text-gray-500 uppercase px-1">Anon_Key</label>
+              <textarea rows={4} value={config.key} onChange={(e) => setConfig(prev => ({ ...prev, key: e.target.value }))} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs mono text-indigo-300 focus:outline-none resize-none" />
             </div>
 
-            <button 
-              onClick={handleSave}
-              disabled={isSaving}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl flex items-center justify-center gap-3 transition-all font-black text-[10px] tracking-widest uppercase disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-              Aplicar Mudanças
+            <button onClick={handleSave} disabled={isSaving} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl flex items-center justify-center gap-3 font-black text-[10px] uppercase transition-all">
+              {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Sincronizar Supabase
+            </button>
+
+            <button onClick={onMigrate} className="w-full bg-white/5 hover:bg-white/10 text-gray-400 p-4 rounded-xl flex items-center justify-center gap-3 font-black text-[10px] uppercase transition-all border border-white/5">
+              <DownloadCloud size={16} /> Forçar Re-Sync Nuvem
             </button>
           </div>
         </div>
 
-        <div className="p-6 bg-white/5 rounded-2xl border border-white/5 space-y-4">
+        <div className="p-6 bg-amber-500/5 rounded-2xl border border-amber-500/10 space-y-4">
           <div className="flex items-center gap-2 text-amber-500">
-            <AlertTriangle size={14} />
-            <h4 className="text-[10px] font-black uppercase tracking-widest">Informação_Crítica</h4>
+            <ShieldAlert size={14} />
+            <h4 className="text-[10px] font-black uppercase">Migração_Dados</h4>
           </div>
           <p className="text-[11px] text-gray-400 leading-relaxed">
-            Alterar estas variáveis reinicializará a conexão do núcleo. Certifique-se de que o esquema do banco de dados está atualizado (Aura Schema v2.1).
+            Se você tem logs antigos salvos no navegador, o sistema tenta importá-los automaticamente. Você pode ver logs locais com o prefixo <b>LCL_LOG</b> na barra lateral.
           </p>
-          <a 
-            href="https://supabase.com" 
-            target="_blank" 
-            className="flex items-center gap-2 text-[10px] text-indigo-400 hover:text-indigo-300 font-bold transition-colors"
-          >
-            Acessar Painel Supabase <ExternalLink size={10} />
-          </a>
         </div>
       </aside>
     </div>
