@@ -5,7 +5,7 @@ import {
   Fingerprint, Database, Info, Loader2, Sparkles, Binary, 
   RefreshCw, Terminal, Settings, ShieldAlert, CheckCircle, 
   AlertTriangle, Trash2, Save, ExternalLink, Key, Lock,
-  DownloadCloud, UploadCloud
+  DownloadCloud, UploadCloud, User, ShieldCheck, LogOut
 } from 'lucide-react';
 import { AppState, Session, Message, SoulState, SystemLog } from './types';
 import { processAILogic, summarizeInteractions } from './services/geminiService';
@@ -26,10 +26,102 @@ declare global {
     openSelectKey: () => Promise<void>;
   }
   interface Window {
-    // Removed readonly modifier to fix "All declarations of 'aistudio' must have identical modifiers"
+    // Fixed: Removed 'readonly' modifier as it may conflict with other environment declarations of aistudio
     aistudio: AIStudio;
   }
 }
+
+// --- Componente de Login ---
+const LoginPage: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isAccessing, setIsAccessing] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsAccessing(true);
+    setError('');
+
+    // Validação das credenciais solicitadas
+    setTimeout(() => {
+      if (username === 'adminultra' && password === 'aura8000') {
+        localStorage.setItem('aura_auth_token', 'session_active_' + Date.now());
+        onLogin();
+      } else {
+        setError('Acesso Negado: Assinatura Neural Inválida.');
+        setIsAccessing(false);
+      }
+    }, 800);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-950 overflow-hidden font-sans">
+      {/* Background Decorativo */}
+      <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_50%_50%,#4f46e5,transparent_70%)]" />
+      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-purple-600/10 rounded-full blur-[120px] animate-pulse" />
+      
+      <form 
+        onSubmit={handleSubmit}
+        className="relative w-full max-w-md p-10 bg-gray-900/40 backdrop-blur-3xl border border-white/10 rounded-[3rem] shadow-[0_0_80px_rgba(0,0,0,0.5)] space-y-8 animate-in fade-in zoom-in duration-700"
+      >
+        <div className="text-center space-y-4">
+          <div className="mx-auto w-20 h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center text-indigo-400 border border-indigo-500/20 shadow-[0_0_30px_rgba(99,102,241,0.2)]">
+            <ShieldCheck size={40} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black tracking-tighter text-white uppercase italic">Neural Gateway</h1>
+            <p className="text-[10px] font-bold text-gray-500 tracking-[0.3em] uppercase">Autenticação de Protocolo Aura</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="relative group">
+            <User className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors" size={16} />
+            <input 
+              required
+              type="text" 
+              placeholder="IDENTIDADE" 
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full bg-black/40 border border-white/10 rounded-2xl pl-12 pr-6 py-4 text-xs font-bold tracking-widest text-white placeholder:text-gray-700 focus:outline-none focus:border-indigo-500/50 transition-all uppercase"
+            />
+          </div>
+
+          <div className="relative group">
+            <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors" size={16} />
+            <input 
+              required
+              type="password" 
+              placeholder="CÓDIGO DE ACESSO" 
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-black/40 border border-white/10 rounded-2xl pl-12 pr-6 py-4 text-xs font-bold tracking-widest text-white placeholder:text-gray-700 focus:outline-none focus:border-indigo-500/50 transition-all"
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2 p-4 bg-red-500/5 border border-red-500/20 rounded-xl text-[10px] font-bold text-red-400 uppercase tracking-wider animate-shake">
+            <AlertTriangle size={14} /> {error}
+          </div>
+        )}
+
+        <button 
+          type="submit" 
+          disabled={isAccessing}
+          className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 text-white font-black py-5 rounded-2xl text-[10px] tracking-[0.2em] uppercase flex items-center justify-center gap-3 transition-all shadow-[0_10px_30px_rgba(79,70,229,0.3)]"
+        >
+          {isAccessing ? <Loader2 className="animate-spin" size={18} /> : <>SINCRONIZAR <Zap size={14} /></>}
+        </button>
+
+        <p className="text-center text-[9px] text-gray-600 font-bold uppercase tracking-widest">
+          Aviso: Tentativas não autorizadas serão logadas no núcleo.
+        </p>
+      </form>
+    </div>
+  );
+};
 
 const SoulOrb: React.FC<{ soul: SoulState, isAwake: boolean }> = ({ soul, isAwake }) => {
   const hue = 220 + (soul.felicidade * 0.6) - (soul.tristeza * 0.5); 
@@ -51,6 +143,12 @@ const SoulOrb: React.FC<{ soul: SoulState, isAwake: boolean }> = ({ soul, isAwak
           0%, 100% { transform: scale(${scale}); opacity: 0.8; }
           50% { transform: scale(${scale * 1.1}); opacity: 1; }
         }
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-5px); }
+          75% { transform: translateX(5px); }
+        }
+        .animate-shake { animation: shake 0.2s ease-in-out 3; }
       `}</style>
       <div style={orbStyle} className="absolute w-48 h-48 rounded-full transition-all duration-1000 ease-in-out z-10" />
       {isAwake && (
@@ -64,23 +162,21 @@ const SoulOrb: React.FC<{ soul: SoulState, isAwake: boolean }> = ({ soul, isAwak
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<'interactions' | 'soul' | 'system'>('interactions');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('aura_auth_token'));
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   
   const [state, setState] = useState<AppState>(() => {
-    // Tenta carregar o estado atual
     const saved = localStorage.getItem('aura_v2_state');
-    const legacy = localStorage.getItem('aura_state'); // Verifica chave antiga
+    const legacy = localStorage.getItem('aura_state');
     
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Garante que sessions always exist
       if (!parsed.sessions) parsed.sessions = [];
       return parsed;
     } else if (legacy) {
-      // Migra do formato antigo se existir
       const parsedLegacy = JSON.parse(legacy);
       return {
         isAwake: false,
@@ -110,8 +206,10 @@ const App: React.FC = () => {
   const isProcessingProactive = useRef(false);
 
   useEffect(() => {
-    checkApiKey();
-  }, []);
+    if (isAuthenticated) {
+      checkApiKey();
+    }
+  }, [isAuthenticated]);
 
   const checkApiKey = async () => {
     const selected = await window.aistudio.hasSelectedApiKey();
@@ -123,6 +221,13 @@ const App: React.FC = () => {
     await window.aistudio.openSelectKey();
     setHasKey(true);
     initApp();
+  };
+
+  const handleLogout = () => {
+    if (confirm("Deseja encerrar a sessão neural?")) {
+      localStorage.removeItem('aura_auth_token');
+      setIsAuthenticated(false);
+    }
   };
 
   const addLog = (type: SystemLog['type'], message: string, context?: string) => {
@@ -138,7 +243,7 @@ const App: React.FC = () => {
 
   const initApp = async () => {
     if (!supabase) {
-      addLog('warn', 'Supabase não configurado. Mantendo logs locais.', 'SYSTEM');
+      addLog('warn', 'Núcleo Supabase não configurado nos arquivos ou localStorage.', 'SYSTEM');
       return;
     }
     
@@ -152,8 +257,6 @@ const App: React.FC = () => {
         
         if (context) {
           setState(prev => {
-            // Mesclagem Inteligente: Mantém sessões locais e adiciona as da nuvem se não existirem
-            const existingIds = new Set(prev.sessions.map(s => s.id));
             const cloudSession: Session | null = context.history.length > 0 ? {
               id: 'cloud-sync-' + Date.now(),
               date: 'Recuperado da Nuvem',
@@ -186,8 +289,10 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    localStorage.setItem('aura_v2_state', JSON.stringify(state));
-  }, [state]);
+    if (isAuthenticated) {
+      localStorage.setItem('aura_v2_state', JSON.stringify(state));
+    }
+  }, [state, isAuthenticated]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -250,7 +355,7 @@ const App: React.FC = () => {
 
     } catch (e: any) {
       if (e.message.includes('quota') || e.message.includes('not found')) {
-        addLog('error', 'Quota Excedida ou Chave Inválida.', 'AI_ENGINE');
+        addLog('error', 'Quota Excedida ou Chave Gemini Inválida.', 'AI_ENGINE');
         setHasKey(false);
       } else {
         addLog('error', `Erro neural: ${e.message}`, 'AI_ENGINE');
@@ -259,7 +364,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!state.isAwake || !state.currentSessionId) return;
+    if (!state.isAwake || !state.currentSessionId || !isAuthenticated) return;
 
     const proactiveInterval = setInterval(async () => {
       if (isProcessingProactive.current || loading) return;
@@ -279,7 +384,7 @@ const App: React.FC = () => {
     }, 5000); 
 
     return () => clearInterval(proactiveInterval);
-  }, [state.isAwake, state.currentSessionId, state.sessions, loading, state.awakeSince]);
+  }, [state.isAwake, state.currentSessionId, state.sessions, loading, state.awakeSince, isAuthenticated]);
 
   const handleTogglePower = async () => {
     try {
@@ -334,6 +439,11 @@ const App: React.FC = () => {
     }
   };
 
+  // --- Renderização Condicional de Auth ---
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  }
+
   if (hasKey === false) {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/90 backdrop-blur-xl p-8 text-center">
@@ -344,11 +454,11 @@ const App: React.FC = () => {
           <div className="space-y-4">
             <h2 className="text-2xl font-black tracking-tighter text-white uppercase italic">Núcleo Bloqueado</h2>
             <p className="text-sm text-gray-400 leading-relaxed">
-              Vincule seu projeto pago para restaurar a consciência total.
+              Vincule seu projeto pago para restaurar a consciência total da Aura.
             </p>
           </div>
           <button onClick={handleOpenKeySelector} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl text-xs tracking-widest uppercase flex items-center justify-center gap-3 transition-all">
-            <Key size={16} /> Vincular Chave
+            <Key size={16} /> Vincular Chave Gemini
           </button>
         </div>
       </div>
@@ -467,7 +577,7 @@ const App: React.FC = () => {
           </>
         )}
         {currentPage === 'soul' && <SoulRecords state={state} />}
-        {currentPage === 'system' && <SystemPage logs={logs} setLogs={setLogs} addLog={addLog} onRefresh={initApp} onMigrate={initApp} />}
+        {currentPage === 'system' && <SystemPage logs={logs} setLogs={setLogs} addLog={addLog} onRefresh={initApp} onMigrate={initApp} onLogout={handleLogout} />}
       </main>
     </div>
   );
@@ -520,8 +630,9 @@ const SystemPage: React.FC<{
   setLogs: React.Dispatch<React.SetStateAction<SystemLog[]>>,
   addLog: (type: SystemLog['type'], message: string, context?: string) => void,
   onRefresh: () => void,
-  onMigrate: () => void
-}> = ({ logs, setLogs, addLog, onRefresh, onMigrate }) => {
+  onMigrate: () => void,
+  onLogout: () => void
+}> = ({ logs, setLogs, addLog, onRefresh, onMigrate, onLogout }) => {
   const [config, setConfig] = useState(getSupabaseConfig());
   const [isSaving, setIsSaving] = useState(false);
 
@@ -573,12 +684,29 @@ const SystemPage: React.FC<{
 
       <aside className="w-96 p-8 bg-gray-900/20 space-y-8 overflow-y-auto">
         <div className="space-y-6">
-          <div className="flex items-center gap-3 text-indigo-400">
-            <Settings size={18} />
-            <h3 className="text-xs font-black uppercase tracking-widest">Config_Núcleo</h3>
+          <div className="flex items-center justify-between text-indigo-400">
+            <div className="flex items-center gap-3">
+              <Settings size={18} />
+              <h3 className="text-xs font-black uppercase tracking-widest">Config_Núcleo</h3>
+            </div>
+            <button 
+              onClick={onLogout}
+              className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-all"
+              title="Encerrar Sessão"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
           
           <div className="space-y-4">
+            <div className="p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl space-y-2">
+              <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">Status da Conexão</p>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${supabase ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                <span className="text-[11px] mono">{supabase ? 'ONLINE' : 'OFFLINE / AGUARDANDO CONFIG'}</span>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-gray-500 uppercase px-1">Supabase_URL</label>
               <input type="text" value={config.url} onChange={(e) => setConfig(prev => ({ ...prev, url: e.target.value }))} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs mono text-indigo-300 focus:outline-none" />
@@ -589,12 +717,12 @@ const SystemPage: React.FC<{
               <textarea rows={4} value={config.key} onChange={(e) => setConfig(prev => ({ ...prev, key: e.target.value }))} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs mono text-indigo-300 focus:outline-none resize-none" />
             </div>
 
-            <button onClick={handleSave} disabled={isSaving} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl flex items-center justify-center gap-3 font-black text-[10px] uppercase transition-all">
-              {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Sincronizar Supabase
+            <button onClick={handleSave} disabled={isSaving} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl flex items-center justify-center gap-3 font-black text-[10px] uppercase transition-all shadow-lg shadow-indigo-600/20">
+              {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Sobrescrever Conexão
             </button>
 
             <button onClick={onMigrate} className="w-full bg-white/5 hover:bg-white/10 text-gray-400 p-4 rounded-xl flex items-center justify-center gap-3 font-black text-[10px] uppercase transition-all border border-white/5">
-              <DownloadCloud size={16} /> Forçar Re-Sync Nuvem
+              <DownloadCloud size={16} /> Restaurar do Núcleo Estático
             </button>
           </div>
         </div>
@@ -602,10 +730,10 @@ const SystemPage: React.FC<{
         <div className="p-6 bg-amber-500/5 rounded-2xl border border-amber-500/10 space-y-4">
           <div className="flex items-center gap-2 text-amber-500">
             <ShieldAlert size={14} />
-            <h4 className="text-[10px] font-black uppercase">Migração_Dados</h4>
+            <h4 className="text-[10px] font-black uppercase">Nota Técnica</h4>
           </div>
           <p className="text-[11px] text-gray-400 leading-relaxed">
-            Se você tem logs antigos salvos no navegador, o sistema tenta importá-los automaticamente. Você pode ver logs locais com o prefixo <b>LCL_LOG</b> na barra lateral.
+            As chaves configuradas em <b>services/supabaseService.ts</b> são usadas como padrão. O logout remove sua permissão de visualização local.
           </p>
         </div>
       </aside>

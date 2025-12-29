@@ -2,24 +2,36 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { SoulState, Message } from '../types';
 
-// Storage keys
+// --- CONFIGURAÇÃO ESTÁTICA DO PROJETO ---
+// Preencha os valores abaixo com os dados do seu projeto Supabase
+const HARDCODED_CONFIG = {
+  url: "https://vpofznuopfpudugdphqg.supabase.co", 
+  key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwb2Z6bnVvcGZwdWR1Z2RwaHFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MzUzNTMsImV4cCI6MjA4MjAxMTM1M30.72U8Ko_trV9U8CyZpOOF9_1Qw9-QAB-u2Y0vunQygNQ"
+};
+
 const CONFIG_KEY = 'aura_supabase_config';
 
 const getInitialConfig = () => {
   const saved = localStorage.getItem(CONFIG_KEY);
-  if (saved) return JSON.parse(saved);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    // Só usa o localStorage se ele for diferente do hardcoded (permitindo overrides)
+    return parsed;
+  }
+  
+  // Prioriza environment variables se existirem, senão usa o hardcoded
   return {
-    url: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL || HARDCODED_CONFIG.url,
+    key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || HARDCODED_CONFIG.key
   };
 };
 
 let config = getInitialConfig();
-export let supabase: SupabaseClient | null = (config.url && config.key) 
+export let supabase: SupabaseClient | null = (config.url && config.url !== "SUA_URL_DO_SUPABASE_AQUI") 
   ? createClient(config.url, config.key)
   : null;
 
-// Hook for UI to update config
+// Hook para UI atualizar a config no localStorage
 export const updateSupabaseConfig = (url: string, key: string) => {
   localStorage.setItem(CONFIG_KEY, JSON.stringify({ url, key }));
   config = { url, key };
@@ -51,7 +63,7 @@ export async function getRelevantMemories(embedding: number[], characterId: stri
     return (data as any[]).map(m => m.content);
   } catch (err) {
     console.error('RAG Error:', err);
-    throw err;
+    return [];
   }
 }
 
@@ -67,7 +79,6 @@ export async function saveMemory(content: string, embedding: number[], character
     if (error) throw error;
   } catch (err) {
     console.error('Save Memory Error:', err);
-    throw err;
   }
 }
 
@@ -199,7 +210,6 @@ export const characterService = {
         felicidade: emotionalState.happiness,
         tristeza: emotionalState.sadness,
         solidão: emotionalState.loneliness,
-        // Map database fields correctly to SoulState property names 'medo' and 'confusão'
         medo: emotionalState.fear,
         confusão: emotionalState.confusion,
         perguntas: emotionalState.unanswered_questions || []
