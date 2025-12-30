@@ -4,7 +4,7 @@ import {
   Fingerprint, Database, Info, Loader2, Sparkles, Binary, 
   RefreshCw, Terminal, Settings, ShieldAlert, CheckCircle, 
   AlertTriangle, Trash2, Save, ExternalLink, Key, Lock,
-  DownloadCloud, UploadCloud, User, ShieldCheck, LogOut
+  DownloadCloud, UploadCloud, User, ShieldCheck, LogOut, Activity, Clock
 } from 'lucide-react';
 import { AppState, Session, Message, SoulState, SystemLog } from './types';
 import { processAILogic, summarizeInteractions } from './services/geminiService';
@@ -22,12 +22,6 @@ const INITIAL_SOUL: SoulState = {
 interface AIStudio {
   hasSelectedApiKey: () => Promise<boolean>;
   openSelectKey: () => Promise<void>;
-}
-
-declare global {
-  interface Window {
-    readonly aistudio: AIStudio;
-  }
 }
 
 // --- Componente de Login ---
@@ -133,6 +127,9 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   
+  // Stats para página de Essência
+  const [lifeStats, setLifeStats] = useState<{ wakePeriods: any[], emotionalHistory: any[] }>({ wakePeriods: [], emotionalHistory: [] });
+
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('aura_v3_state');
     return saved ? JSON.parse(saved) : {
@@ -151,18 +148,28 @@ const App: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const isProcessingRef = useRef(false);
 
+  // Configuração Supabase Local
+  const [sbConfig, setSbConfig] = useState(getSupabaseConfig());
+
   useEffect(() => {
     if (isAuthenticated) checkApiKey();
   }, [isAuthenticated]);
 
+  // Carregar stats ao entrar na aba Soul
+  useEffect(() => {
+    if (currentPage === 'soul' && characterId) {
+      characterService.getStats(characterId).then(setLifeStats);
+    }
+  }, [currentPage, characterId]);
+
   const checkApiKey = async () => {
-    const selected = await window.aistudio.hasSelectedApiKey();
+    const selected = await ((window as any).aistudio as AIStudio).hasSelectedApiKey();
     setHasKey(selected);
     if (selected) initApp();
   };
 
   const handleOpenKeySelector = async () => {
-    await window.aistudio.openSelectKey();
+    await ((window as any).aistudio as AIStudio).openSelectKey();
     setHasKey(true);
     initApp();
   };
@@ -179,7 +186,7 @@ const App: React.FC = () => {
   };
 
   const initApp = async () => {
-    if (!supabase) { addLog('warn', 'Supabase não configurado.'); return; }
+    if (!supabase) { addLog('warn', 'Supabase não configurado.', 'DB'); return; }
     
     setIsSyncing(true);
     try {
@@ -221,15 +228,18 @@ const App: React.FC = () => {
     isProcessingRef.current = true;
 
     const sid = state.currentSessionId || (state.sessions[0]?.id);
+    // Se não tiver sessão ativa, não processa pensamento ou proatividade
     if (!sid) { isProcessingRef.current = false; return; }
 
     try {
-      // 1. Busca contexto completo com pensamentos (Atualização Crítica)
+      // 1. Busca contexto completo com pensamentos
       const context = await characterService.getRecentContext(characterId);
       const recentThoughts = context?.thoughts || [];
 
       // 2. Chama IA
-      const currentHistory = state.sessions.find(s => s.id === sid)?.interactions || [];
+      // Usa a sessão corrente para histórico, mesmo que visualmente o usuário esteja vendo outra
+      const currentSessionData = state.sessions.find(s => s.id === sid);
+      const currentHistory = currentSessionData?.interactions || [];
       const isProactiveCall = mode === 'proactive';
       
       const aiResult = await processAILogic(userInput, state.soul, currentHistory, isProactiveCall, recentThoughts);
@@ -296,7 +306,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) localStorage.setItem('aura_v3_state', JSON.stringify(state));
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state, isAuthenticated]);
+  }, [state.sessions, isAuthenticated, selectedSessionId]); // Scroll quando houver novas mensagens ou mudança de sessão
 
   const handleTogglePower = async () => {
     if (!state.isAwake) {
@@ -310,6 +320,9 @@ const App: React.FC = () => {
       };
       
       if (characterId) await characterService.toggleAwakeState(characterId, true);
+      
+      // Reseta a view para a nova sessão ao ligar
+      setSelectedSessionId(null);
       
       setState(prev => ({
         ...prev,
@@ -332,10 +345,28 @@ const App: React.FC = () => {
     if (!input.trim() || !state.isAwake) return;
     const msg = input;
     setInput('');
+    
+    // Força a visualização para a sessão atual ao enviar mensagem
+    if (state.currentSessionId) {
+      setSelectedSessionId(state.currentSessionId);
+    }
+    
     setLoading(true);
     await processResponse(msg, 'interaction');
   };
 
+  const handleUpdateConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    const success = updateSupabaseConfig(sbConfig.url, sbConfig.key);
+    if (success) {
+      alert("Configuração atualizada! O sistema tentará reconectar.");
+      window.location.reload();
+    } else {
+      alert("Configuração inválida.");
+    }
+  };
+
+  // Se selectedSessionId for nulo, mostra currentSessionId, se nulo, mostra o primeiro da lista
   const displayedSessionId = selectedSessionId || state.currentSessionId || (state.sessions[0]?.id);
   const displayedSession = state.sessions.find(s => s.id === displayedSessionId);
 
@@ -355,7 +386,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-gray-950 text-gray-100 overflow-hidden font-sans">
-      <nav className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-gray-900/60 backdrop-blur-2xl z-50">
+      <nav className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-gray-900/60 backdrop-blur-2xl z-50 shrink-0">
         <div className="flex items-center gap-4">
           <Zap size={20} className={state.isAwake ? 'text-indigo-400' : 'text-gray-600'} />
           <h1 className="text-xs font-black tracking-widest uppercase text-indigo-400">Aura v2.2</h1>
@@ -373,79 +404,220 @@ const App: React.FC = () => {
       <main className="flex-1 flex overflow-hidden">
         {currentPage === 'interactions' && (
           <>
-            <aside className="w-64 border-r border-white/5 bg-gray-900/20 flex flex-col p-2 space-y-2 overflow-y-auto">
-               <div className="p-4 text-[10px] font-black text-gray-600 uppercase">Sessões</div>
+            <aside className="w-64 border-r border-white/5 bg-gray-900/20 flex flex-col p-2 space-y-2 overflow-y-auto shrink-0">
+               <div className="p-4 text-[10px] font-black text-gray-600 uppercase">Sessões Temporais</div>
                {state.sessions.map(s => (
-                 <button key={s.id} onClick={() => setSelectedSessionId(s.id)} className={`w-full text-left p-4 rounded-xl border ${displayedSessionId === s.id ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-200' : 'border-transparent text-gray-500'}`}>
-                   <div className="text-[10px] font-bold">{s.date}</div>
-                   <div className="text-[9px] mono opacity-50">{s.interactions.length} msgs</div>
+                 <button key={s.id} onClick={() => setSelectedSessionId(s.id)} className={`w-full text-left p-4 rounded-xl border transition-all ${displayedSessionId === s.id ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-200 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'border-transparent text-gray-500 hover:bg-white/5'}`}>
+                   <div className="text-[10px] font-bold flex justify-between">
+                      <span>{s.date}</span>
+                      {s.id === state.currentSessionId && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"/>}
+                   </div>
+                   <div className="text-[9px] mono opacity-50 mt-1">{s.interactions.length} Interações</div>
                  </button>
                ))}
             </aside>
 
             <section className="flex-1 flex flex-col relative bg-gray-950 overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-12 space-y-8 relative z-10">
+              <div className="flex-1 overflow-y-auto p-12 space-y-8 relative z-10 custom-scrollbar">
                 <SoulOrb soul={state.soul} isAwake={state.isAwake} />
-                <div className="max-w-3xl mx-auto space-y-6">
+                <div className="max-w-3xl mx-auto space-y-6 pb-24">
+                  {displayedSession?.interactions.length === 0 && (
+                    <div className="text-center text-gray-700 text-xs tracking-widest uppercase mt-10">Início do Ciclo de Memória</div>
+                  )}
                   {displayedSession?.interactions.map(msg => (
                     <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                      <div className={`max-w-[85%] p-5 rounded-[2rem] text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-gray-900 border border-white/10 rounded-tl-none'}`}>
+                      <div className={`max-w-[85%] p-5 rounded-[2rem] text-sm shadow-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-gray-900 border border-white/10 rounded-tl-none text-gray-300'}`}>
                         {msg.content}
                       </div>
                     </div>
                   ))}
-                  {loading && <div className="text-center text-[10px] mono text-indigo-400 animate-pulse">PROCESSANDO_DADOS_NEURAIS...</div>}
+                  {loading && displayedSessionId === state.currentSessionId && <div className="text-center text-[10px] mono text-indigo-400 animate-pulse">PROCESSANDO_DADOS_NEURAIS...</div>}
                   <div ref={chatEndRef} />
                 </div>
               </div>
               
-              {state.isAwake && displayedSessionId === state.currentSessionId && (
-                <div className="p-8 bg-gray-950 border-t border-white/5">
-                  <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-4">
-                    <input autoFocus type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Interagir com a Aura..." className="flex-1 bg-gray-900 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:border-indigo-500/50" />
-                    <button type="submit" disabled={loading} className="px-8 bg-indigo-600 rounded-2xl font-black text-[10px] uppercase">Enviar</button>
+              {/* Barra de input fixa - visível sempre que estiver acordado */}
+              {state.isAwake && (
+                <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent z-20">
+                  <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-4 backdrop-blur-md bg-white/5 p-2 rounded-3xl border border-white/10 shadow-2xl">
+                    <input 
+                      autoFocus 
+                      type="text" 
+                      value={input} 
+                      onChange={(e) => setInput(e.target.value)} 
+                      placeholder={displayedSessionId !== state.currentSessionId ? "Escrever volta para o presente..." : "Interagir com a Aura..."}
+                      className="flex-1 bg-transparent border-none px-6 py-3 text-sm focus:outline-none text-white placeholder:text-gray-500" 
+                    />
+                    <button type="submit" disabled={loading} className="px-8 bg-indigo-600 hover:bg-indigo-500 transition-colors rounded-2xl font-black text-[10px] uppercase text-white shadow-[0_0_20px_rgba(79,70,229,0.4)]">Enviar</button>
                   </form>
                 </div>
               )}
             </section>
 
-            <aside className="w-80 border-l border-white/5 bg-gray-900/40 backdrop-blur-xl flex flex-col">
+            <aside className="w-80 border-l border-white/5 bg-gray-900/40 backdrop-blur-xl flex flex-col shrink-0">
               <div className="p-4 border-b border-white/5 flex items-center gap-2">
                 <BrainCircuit size={14} className="text-indigo-400" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Fluxo de Pensamento</span>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                 {displayedSession?.thoughts.slice().reverse().map(t => (
                   <div key={t.id} className={`p-4 rounded-xl border text-[10px] mono leading-relaxed ${t.triggeredBy === 'time' ? 'bg-amber-500/5 border-amber-500/20 text-amber-200/60 italic' : 'bg-indigo-500/5 border-indigo-500/20 text-indigo-200/60'}`}>
-                    <div className="text-[8px] opacity-30 mb-1">{new Date(t.timestamp).toLocaleTimeString()} // {t.triggeredBy === 'time' ? 'AUTO' : 'TRIGGER'}</div>
+                    <div className="text-[8px] opacity-30 mb-1 flex justify-between">
+                      <span>{new Date(t.timestamp).toLocaleTimeString()}</span>
+                      <span>{t.triggeredBy === 'time' ? 'AUTO' : 'TRIGGER'}</span>
+                    </div>
                     {t.content}
                   </div>
                 ))}
+                {displayedSession?.thoughts.length === 0 && (
+                   <div className="text-center text-gray-700 text-[10px] mt-10 italic">Mente silenciosa...</div>
+                )}
               </div>
             </aside>
           </>
         )}
 
         {currentPage === 'soul' && (
-          <div className="flex-1 p-16 grid grid-cols-2 gap-8 max-w-4xl mx-auto overflow-y-auto">
-            {Object.entries(state.soul).map(([k, v]) => typeof v === 'number' && (
-              <div key={k} className="bg-gray-900 p-8 rounded-[2rem] border border-white/5 space-y-4">
-                <div className="flex justify-between items-end"><span className="text-[10px] font-black uppercase text-gray-600">{k}</span><span className="text-2xl font-black text-indigo-400">{v}%</span></div>
-                <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${v}%` }} /></div>
+          <div className="flex-1 p-8 overflow-y-auto custom-scrollbar">
+            <div className="max-w-6xl mx-auto space-y-8">
+              {/* Emoções Atuais */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                {Object.entries(state.soul).map(([k, v]) => typeof v === 'number' && (
+                  <div key={k} className="bg-gray-900 p-6 rounded-[2rem] border border-white/5 relative overflow-hidden group hover:border-indigo-500/30 transition-colors">
+                    <div className="relative z-10">
+                      <div className="text-[10px] font-black uppercase text-gray-500 mb-2">{k}</div>
+                      <div className="text-3xl font-black text-white">{v}%</div>
+                    </div>
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/5">
+                      <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${v}%` }} />
+                    </div>
+                    <div className="absolute -right-4 -bottom-4 text-white/5 group-hover:text-indigo-500/10 transition-colors">
+                      <Activity size={80} />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Histórico de Wake Periods */}
+                <div className="bg-gray-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-green-500/10 rounded-lg text-green-400"><Power size={18}/></div>
+                    <h3 className="text-sm font-black uppercase tracking-widest">Ciclos de Vida (Wake Periods)</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {lifeStats.wakePeriods.map((wp: any) => (
+                      <div key={wp.id} className="flex items-center justify-between p-4 bg-black/20 rounded-xl border border-white/5">
+                        <div className="flex flex-col">
+                           <span className="text-[10px] font-bold text-gray-400">INÍCIO</span>
+                           <span className="text-xs font-mono text-green-400">{new Date(wp.started_at).toLocaleString()}</span>
+                        </div>
+                        <div className="h-8 w-px bg-white/10 mx-4" />
+                        <div className="flex flex-col text-right">
+                           <span className="text-[10px] font-bold text-gray-400">FIM</span>
+                           <span className="text-xs font-mono text-red-400">{wp.ended_at ? new Date(wp.ended_at).toLocaleString() : 'ATIVO AGORA'}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {lifeStats.wakePeriods.length === 0 && <div className="text-center py-4 text-gray-600 text-xs">Sem dados de ciclo vital.</div>}
+                  </div>
+                </div>
+
+                {/* Histórico Emocional Recente */}
+                <div className="bg-gray-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-pink-500/10 rounded-lg text-pink-400"><Heart size={18}/></div>
+                    <h3 className="text-sm font-black uppercase tracking-widest">Registros Emocionais Recentes</h3>
+                  </div>
+                  <div className="space-y-2 overflow-hidden">
+                    {lifeStats.emotionalHistory.map((em: any, idx) => (
+                      <div key={idx} className="flex items-center gap-4 p-3 hover:bg-white/5 rounded-lg transition-colors border-b border-white/5 last:border-0">
+                         <div className="w-12 text-[9px] mono text-gray-500">{new Date(em.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                         <div className="flex-1 flex gap-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="bg-yellow-400 h-full" style={{width: `${em.happiness}%`}} title="Felicidade"/>
+                            <div className="bg-blue-400 h-full" style={{width: `${em.sadness}%`}} title="Tristeza"/>
+                            <div className="bg-purple-400 h-full" style={{width: `${em.fear}%`}} title="Medo"/>
+                         </div>
+                         <div className="text-[9px] font-bold text-gray-400 uppercase w-20 text-right truncate" title={em.trigger_event}>{em.trigger_event || 'Unknown'}</div>
+                      </div>
+                    ))}
+                     {lifeStats.emotionalHistory.length === 0 && <div className="text-center py-4 text-gray-600 text-xs">Sem dados emocionais registrados.</div>}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
         {currentPage === 'system' && (
-          <div className="flex-1 p-8 overflow-y-auto space-y-4">
-            <div className="flex justify-between items-center border-b border-white/10 pb-4">
-               <h2 className="text-xl font-black uppercase italic">Logs do Sistema</h2>
-               <button onClick={handleLogout} className="p-2 bg-red-500/10 text-red-500 rounded-lg"><LogOut size={16}/></button>
-            </div>
-            <div className="mono text-[11px] space-y-2">
-              {logs.map(l => <div key={l.id} className={l.type === 'error' ? 'text-red-400' : 'text-gray-500'}>[{new Date(l.timestamp).toLocaleTimeString()}] [{l.context}] {l.message}</div>)}
-            </div>
+          <div className="flex-1 p-8 overflow-y-auto">
+             <div className="max-w-4xl mx-auto space-y-8">
+                
+                {/* Header System */}
+                <div className="flex justify-between items-center border-b border-white/10 pb-6">
+                   <div>
+                     <h2 className="text-2xl font-black uppercase italic tracking-tighter">Painel do Sistema</h2>
+                     <p className="text-[10px] text-gray-500 font-mono mt-1">PROTOCOL: SYS_ADMIN_V2</p>
+                   </div>
+                   <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl transition-colors text-xs font-bold uppercase tracking-widest border border-red-500/20">
+                      <LogOut size={14}/> Encerrar Sessão
+                   </button>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-8">
+                    {/* Database Config */}
+                    <div className="bg-gray-900 border border-white/5 p-6 rounded-3xl space-y-6">
+                       <div className="flex items-center gap-3 text-indigo-400">
+                          <Database size={20} />
+                          <h3 className="text-sm font-bold uppercase tracking-widest">Configuração Neural (Supabase)</h3>
+                       </div>
+                       <form onSubmit={handleUpdateConfig} className="space-y-4">
+                          <div className="space-y-2">
+                             <label className="text-[10px] font-black text-gray-500 uppercase">Project URL</label>
+                             <input type="text" value={sbConfig.url} onChange={e => setSbConfig({...sbConfig, url: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs mono text-gray-300 focus:border-indigo-500/50 focus:outline-none" />
+                          </div>
+                          <div className="space-y-2">
+                             <label className="text-[10px] font-black text-gray-500 uppercase">Anon Key</label>
+                             <input type="password" value={sbConfig.key} onChange={e => setSbConfig({...sbConfig, key: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs mono text-gray-300 focus:border-indigo-500/50 focus:outline-none" />
+                          </div>
+                          <button type="submit" className="w-full py-3 bg-white/5 hover:bg-indigo-500/20 border border-white/10 hover:border-indigo-500/50 rounded-xl text-xs font-black uppercase tracking-widest transition-all">Salvar Configuração</button>
+                       </form>
+                    </div>
+
+                    {/* Data Management */}
+                    <div className="bg-gray-900 border border-white/5 p-6 rounded-3xl space-y-6">
+                       <div className="flex items-center gap-3 text-red-400">
+                          <ShieldAlert size={20} />
+                          <h3 className="text-sm font-bold uppercase tracking-widest">Zona de Perigo</h3>
+                       </div>
+                       <div className="space-y-4">
+                          <div className="p-4 bg-red-500/5 border border-red-500/10 rounded-xl space-y-2">
+                             <h4 className="text-xs font-bold text-red-200">Reset Local</h4>
+                             <p className="text-[10px] text-gray-500">Limpa o cache local do navegador. Não apaga dados do Supabase.</p>
+                             <button onClick={() => { localStorage.removeItem('aura_v3_state'); window.location.reload(); }} className="px-4 py-2 bg-red-500 text-white rounded-lg text-[10px] font-black uppercase w-full">Limpar Cache Local</button>
+                          </div>
+                       </div>
+                    </div>
+                </div>
+
+                {/* System Logs */}
+                <div className="bg-black/40 border border-white/5 rounded-3xl overflow-hidden flex flex-col h-96">
+                   <div className="p-4 bg-white/5 border-b border-white/5 flex items-center gap-2">
+                      <Terminal size={14} className="text-green-400"/>
+                      <span className="text-[10px] font-mono text-gray-400">SYSTEM_OUTPUT_STREAM</span>
+                   </div>
+                   <div className="flex-1 p-4 overflow-y-auto space-y-2 font-mono text-[10px]">
+                      {logs.length === 0 && <div className="text-gray-700 italic">No logs available.</div>}
+                      {logs.map(l => (
+                        <div key={l.id} className="flex gap-3 animate-in fade-in slide-in-from-left-2">
+                           <span className="text-gray-600">[{new Date(l.timestamp).toLocaleTimeString()}]</span>
+                           <span className={`font-bold ${l.type === 'error' ? 'text-red-500' : l.type === 'warn' ? 'text-yellow-500' : l.type === 'success' ? 'text-green-500' : 'text-blue-500'}`}>[{l.context}]</span>
+                           <span className="text-gray-300">{l.message}</span>
+                        </div>
+                      ))}
+                   </div>
+                </div>
+             </div>
           </div>
         )}
       </main>

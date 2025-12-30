@@ -220,5 +220,28 @@ export const characterService = {
         perguntas: emotionalState.unanswered_questions || []
       } as SoulState : null
     };
+  },
+
+  async getStats(characterId: string) {
+    if (!supabase) return { wakePeriods: [], emotionalHistory: [] };
+
+    const { data: wakePeriods } = await supabase
+      .from('wake_periods')
+      .select('*')
+      .eq('character_id', characterId)
+      .order('started_at', { ascending: false })
+      .limit(5);
+
+    const { data: emotionalHistory } = await supabase
+      .from('emotional_states')
+      .select('created_at, happiness, sadness, loneliness, fear, confusion, trigger_event')
+      .eq('character_id', characterId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    return {
+      wakePeriods: wakePeriods || [],
+      emotionalHistory: emotionalHistory || []
+    };
   }
 };
