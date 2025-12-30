@@ -44,8 +44,8 @@ export function useAuraEngine() {
     };
   });
 
-  // Estatísticas de Vida (Wake Periods / Emoções)
-  const [lifeStats, setLifeStats] = useState<{ wakePeriods: any[], emotionalHistory: any[] }>({ wakePeriods: [], emotionalHistory: [] });
+  // Estatísticas de Vida (Wake Periods / Emoções / Sonhos)
+  const [lifeStats, setLifeStats] = useState<{ wakePeriods: any[], emotionalHistory: any[], dreams: any[] }>({ wakePeriods: [], emotionalHistory: [], dreams: [] });
   
   // Configuração Supabase
   const [sbConfig, setSbConfig] = useState(getSupabaseConfig());
@@ -121,6 +121,18 @@ export function useAuraEngine() {
         
         if (context) {
           setState(prev => {
+            // CORREÇÃO: Se já estiver acordada (sessão ativa), NÃO cria sessão de histórico (cloudSession)
+            // Isso evita que o chat pule para um histórico duplicado enquanto o usuário interage na sessão atual.
+            if (prev.isAwake && prev.currentSessionId) {
+                return {
+                    ...prev,
+                    soul: context.soul || prev.soul,
+                    dreams: context.dreams || []
+                    // Mantém sessions inalterado para não quebrar o chat ativo
+                };
+            }
+
+            // Comportamento padrão (apenas se estiver iniciando/dormindo)
             const cloudSession: Session | null = context.history.length > 0 ? {
               id: 'cloud-' + Date.now(),
               date: 'Sincronizado',
@@ -213,8 +225,9 @@ export function useAuraEngine() {
                 const dream = await generateDream(currentSession.interactions);
                 await saveDream(dream, characterId);
                 addLog('success', 'Sonho arquivado.', 'DREAM');
-             } catch(e) {
-                console.warn("Falha ao sonhar", e);
+             } catch(e: any) {
+                // CORREÇÃO: Usando addLog para erros críticos de banco aparecerem no painel System
+                addLog('error', `Falha ao salvar sonho: ${e.message}`, 'DB_ERR');
              }
         }
       }

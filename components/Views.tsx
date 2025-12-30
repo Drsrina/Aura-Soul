@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect } from 'react';
-import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity } from 'lucide-react';
+import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity, Cloud } from 'lucide-react';
 import { SoulOrb, SoulStatus, EmotionCard } from './Visuals';
 import { Session, AppState, SystemLog } from '../types';
 
@@ -169,10 +169,10 @@ export const InteractionsView: React.FC<InteractionsViewProps> = ({
   );
 };
 
-// --- View: Soul (Essence) - Mantido igual ---
+// --- View: Soul (Essence) ---
 interface SoulViewProps {
   soul: any;
-  lifeStats: { wakePeriods: any[], emotionalHistory: any[] };
+  lifeStats: { wakePeriods: any[], emotionalHistory: any[], dreams: any[] };
 }
 
 export const SoulView: React.FC<SoulViewProps> = ({ soul, lifeStats }) => {
@@ -186,8 +186,8 @@ export const SoulView: React.FC<SoulViewProps> = ({ soul, lifeStats }) => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-gray-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur-sm">
-            <div className="flex items-center gap-3 mb-6">
+          <div className="bg-gray-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur-sm h-80 overflow-y-auto custom-scrollbar">
+            <div className="flex items-center gap-3 mb-6 sticky top-0 bg-gray-900/90 pb-2 z-10 backdrop-blur-md">
               <div className="p-2 bg-green-500/10 rounded-lg text-green-400"><Power size={18}/></div>
               <h3 className="text-sm font-black uppercase tracking-widest">Ciclos de Vida</h3>
             </div>
@@ -209,12 +209,12 @@ export const SoulView: React.FC<SoulViewProps> = ({ soul, lifeStats }) => {
             </div>
           </div>
 
-          <div className="bg-gray-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur-sm">
-            <div className="flex items-center gap-3 mb-6">
+          <div className="bg-gray-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur-sm h-80 overflow-y-auto custom-scrollbar">
+            <div className="flex items-center gap-3 mb-6 sticky top-0 bg-gray-900/90 pb-2 z-10 backdrop-blur-md">
               <div className="p-2 bg-pink-500/10 rounded-lg text-pink-400"><Heart size={18}/></div>
               <h3 className="text-sm font-black uppercase tracking-widest">Registros Emocionais</h3>
             </div>
-            <div className="space-y-2 overflow-hidden">
+            <div className="space-y-2">
               {lifeStats.emotionalHistory.map((em: any, idx) => (
                 <div key={idx} className="flex items-center gap-4 p-3 hover:bg-white/5 rounded-lg transition-colors border-b border-white/5 last:border-0">
                     <div className="w-12 text-[9px] mono text-gray-500">{new Date(em.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
@@ -230,6 +230,24 @@ export const SoulView: React.FC<SoulViewProps> = ({ soul, lifeStats }) => {
             </div>
           </div>
         </div>
+
+        {/* --- NOVO PAINEL DE SONHOS --- */}
+        <div className="bg-gray-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400"><Cloud size={18}/></div>
+            <h3 className="text-sm font-black uppercase tracking-widest">Ecos do Inconsciente (Sonhos)</h3>
+          </div>
+          <div className="space-y-4">
+            {lifeStats.dreams.map((dream: any) => (
+              <div key={dream.id} className="p-4 bg-black/20 rounded-2xl border border-white/5 hover:border-indigo-500/20 transition-colors">
+                <div className="text-[10px] font-mono text-gray-500 mb-2">{new Date(dream.created_at).toLocaleString()}</div>
+                <p className="text-sm italic text-gray-300 font-serif leading-relaxed">"{dream.content}"</p>
+              </div>
+            ))}
+            {lifeStats.dreams.length === 0 && <div className="text-center py-6 text-gray-600 text-xs italic">Nenhum sonho registrado ainda. A IA precisa dormir para sonhar.</div>}
+          </div>
+        </div>
+
       </div>
     </div>
   );

@@ -100,7 +100,7 @@ export async function saveDream(content: string, characterId: string) {
     });
     if (error) throw error;
   } catch (err) {
-    console.error('Save Dream Error:', err);
+    throw err; // Propaga o erro para ser capturado pelo addLog
   }
 }
 
@@ -270,7 +270,7 @@ export const characterService = {
   },
 
   async getStats(characterId: string) {
-    if (!supabase) return { wakePeriods: [], emotionalHistory: [] };
+    if (!supabase) return { wakePeriods: [], emotionalHistory: [], dreams: [] };
 
     const { data: wakePeriods } = await supabase
       .from('wake_periods')
@@ -285,10 +285,18 @@ export const characterService = {
       .eq('character_id', characterId)
       .order('created_at', { ascending: false })
       .limit(10);
+      
+    const { data: dreams } = await supabase
+      .from('dreams')
+      .select('id, content, created_at')
+      .eq('character_id', characterId)
+      .order('created_at', { ascending: false })
+      .limit(10);
 
     return {
       wakePeriods: wakePeriods || [],
-      emotionalHistory: emotionalHistory || []
+      emotionalHistory: emotionalHistory || [],
+      dreams: dreams || []
     };
   }
 };
