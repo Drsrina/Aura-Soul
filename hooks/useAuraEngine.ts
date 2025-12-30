@@ -1,8 +1,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AppState, Session, Message, SoulState, SystemLog } from '../types';
-import { processAILogic, summarizeInteractions } from '../services/geminiService';
-import { characterService, supabase, updateSupabaseConfig, getSupabaseConfig, saveSummary } from '../services/supabaseService';
+import { processAILogic, generateDream } from '../services/geminiService';
+import { characterService, supabase, updateSupabaseConfig, getSupabaseConfig, saveDream } from '../services/supabaseService';
 
 const INITIAL_SOUL: SoulState = {
   felicidade: 50,
@@ -39,7 +39,7 @@ export function useAuraEngine() {
       soul: INITIAL_SOUL,
       currentSessionId: null,
       sessions: [],
-      summaries: [],
+      dreams: [],
       awakeSince: null
     };
   });
@@ -133,7 +133,7 @@ export function useAuraEngine() {
               ...prev,
               soul: context.soul || prev.soul,
               sessions: cloudSession ? [cloudSession, ...prev.sessions] : prev.sessions,
-              summaries: context.summaries || []
+              dreams: context.dreams || []
             };
           });
           addLog('success', 'Núcleo sincronizado.', 'DB');
@@ -194,30 +194,31 @@ export function useAuraEngine() {
         ...prev,
         isAwake: true,
         currentSessionId: newSid,
-        sessions: [newSession, ...prev.sessions]
+        sessions: [newSession, ...prev.sessions],
+        awakeSince: Date.now() 
       }));
       
       setLoading(true);
-      processResponse(null, 'proactive');
+      setTimeout(() => processResponse(null, 'proactive'), 500);
     } else {
       // Desligar
       if (characterId) {
         await characterService.toggleAwakeState(characterId, false);
         
-        // Tenta gerar resumo da sessão atual antes de fechar
+        // GERA UM SONHO AO DESLIGAR
         const currentSession = state.sessions.find(s => s.id === state.currentSessionId);
-        if (currentSession && currentSession.interactions.length > 5) {
-             addLog('info', 'Consolidando memórias da sessão...', 'MEM');
+        if (currentSession && currentSession.interactions.length > 3) {
+             addLog('info', 'Gerando sonho da sessão...', 'DREAM');
              try {
-                const summary = await summarizeInteractions(currentSession.interactions);
-                await saveSummary(summary, characterId);
-                addLog('success', 'Memória episódica salva.', 'MEM');
+                const dream = await generateDream(currentSession.interactions);
+                await saveDream(dream, characterId);
+                addLog('success', 'Sonho arquivado.', 'DREAM');
              } catch(e) {
-                console.warn("Falha ao resumir", e);
+                console.warn("Falha ao sonhar", e);
              }
         }
       }
-      setState(prev => ({ ...prev, isAwake: false, currentSessionId: null }));
+      setState(prev => ({ ...prev, isAwake: false, currentSessionId: null, awakeSince: null }));
     }
   };
 
@@ -244,8 +245,26 @@ export function useAuraEngine() {
       const currentSessionData = state.sessions.find(s => s.id === sid);
       const currentHistory = currentSessionData?.interactions || [];
       const isProactiveCall = mode === 'proactive';
+
+      // --- CÁLCULO DE CONTEXTO TEMPORAL ---
+      const timeAwakeMs = state.awakeSince ? (Date.now() - state.awakeSince) : 0;
+      const minutesAwake = Math.floor(timeAwakeMs / 60000);
       
-      // Passa os sumários (memória episódica) para o cérebro
+      let triggerDescription = "SISTEMA: Ciclo temporal.";
+      
+      if (userInput) {
+        triggerDescription = `USUÁRIO: "${userInput}"`;
+      } else {
+        if (timeAwakeMs < 15000) { 
+            triggerDescription = "SISTEMA: Inicialização do sistema. Você acabou de acordar.";
+        } else if (mode === 'thought') {
+            triggerDescription = `SISTEMA: Você está acordada há ${minutesAwake} minutos. O usuário está em silêncio. Reflita sobre isso ou sobre memórias passadas (Sonhos).`;
+        } else if (mode === 'proactive') {
+            triggerDescription = `SISTEMA: Ociosidade detectada (${minutesAwake} min). Se sentir necessidade, inicie uma conversa sutil.`;
+        }
+      }
+
+      // Passa os SONHOS e o trigger específico para o cérebro
       const aiResult = await processAILogic(
         characterId,
         userInput, 
@@ -253,7 +272,8 @@ export function useAuraEngine() {
         currentHistory, 
         isProactiveCall, 
         recentThoughts,
-        state.summaries // NOVO: Injeta contexto de longo prazo
+        state.dreams,
+        triggerDescription
       );
 
       const updatedSessions = [...state.sessions];

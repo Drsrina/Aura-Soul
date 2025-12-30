@@ -46,46 +46,61 @@ export interface CharacterDB {
 export async function getRelevantMemories(embedding: number[], characterId: string): Promise<string[]> {
   if (!supabase || !characterId) return [];
   try {
-    // Aumentado match_count para 5 para mais contexto
+    // Busca memórias com match_threshold um pouco mais alto para qualidade
+    // A função match_memories no banco deve idealmente filtrar por importance_score se possível, 
+    // mas aqui filtramos pelo retorno da RPC padrão
     const { data, error } = await supabase.rpc('match_memories', {
       query_embedding: embedding,
-      match_threshold: 0.65, // Levemente reduzido para permitir conexões mais abstratas
+      match_threshold: 0.70, 
       match_count: 5,
       character_uuid: characterId
     });
     if (error) throw error;
-    return (data as any[]).map(m => m.content);
+    
+    // Retorna o conteúdo das memórias encontradas
+    return (data as any[]).map(m => {
+       // Se o objeto retornado tiver importance_score, poderiamos filtrar aqui também
+       return m.content;
+    });
   } catch (err) {
     console.error('RAG Error:', err);
     return [];
   }
 }
 
-export async function saveMemory(content: string, embedding: number[], characterId: string) {
+// Nova assinatura para usar todo o poder da tabela memories
+export async function saveAdvancedMemory(
+  characterId: string, 
+  content: string, 
+  embedding: number[], 
+  type: 'recent' | 'core' | 'consolidated',
+  importance: number
+) {
   if (!supabase || !characterId) return;
   try {
     const { error } = await supabase.from('memories').insert({
       character_id: characterId,
       content,
       embedding,
-      memory_type: 'recent'
+      memory_type: type,
+      importance_score: importance
     });
     if (error) throw error;
   } catch (err) {
-    console.error('Save Memory Error:', err);
+    console.error('Save Advanced Memory Error:', err);
   }
 }
 
-export async function saveSummary(content: string, characterId: string) {
+export async function saveDream(content: string, characterId: string) {
   if (!supabase || !characterId) return;
   try {
-    const { error } = await supabase.from('summaries').insert({
+    const { error } = await supabase.from('dreams').insert({
       character_id: characterId,
       content
     });
     if (error) throw error;
   } catch (err) {
-    console.error('Save Summary Error:', err);
+    console.error('Save Dream Error:', err);
   }
 }
 
@@ -107,12 +122,21 @@ export const characterService = {
 
   async toggleAwakeState(characterId: string, isAwake: boolean) {
     if (!supabase) return;
-    const { error } = await supabase.from('characters').update({ 
-      is_awake: isAwake,
-      awakened_at: isAwake ? new Date().toISOString() : null 
-    }).eq('id', characterId);
+    
+    // Atualiza o estado do personagem
+    const updatePayload: any = { is_awake: isAwake };
+    
+    // Força a atualização do timestamp
+    if (isAwake) {
+        updatePayload.awakened_at = new Date().toISOString();
+    }
+    
+    const { error } = await supabase.from('characters').update(updatePayload).eq('id', characterId);
 
-    if (error) throw error;
+    if (error) {
+        console.error("Erro ao atualizar status awake:", error);
+        throw error;
+    }
 
     if (isAwake) {
       await supabase.from('wake_periods').insert([{ character_id: characterId }]);
@@ -188,7 +212,7 @@ export const characterService = {
     if (error) throw error;
   },
 
-  async getRecentContext(characterId: string, limit = 15): Promise<{ history: Message[], soul: SoulState | null, thoughts: string[], summaries: string[] } | null> {
+  async getRecentContext(characterId: string, limit = 15): Promise<{ history: Message[], soul: SoulState | null, thoughts: string[], dreams: string[] } | null> {
     if (!supabase) return null;
     
     // Busca interações (chat)
@@ -215,15 +239,15 @@ export const characterService = {
       .order('created_at', { ascending: false })
       .limit(15);
 
-    // Busca os últimos 3 sumários (Memória Episódica)
-    const { data: summaries, error: sErr } = await supabase
-      .from('summaries')
+    // Busca os últimos 3 SONHOS (Substitui Summaries)
+    const { data: dreams, error: dErr } = await supabase
+      .from('dreams')
       .select('content')
       .eq('character_id', characterId)
       .order('created_at', { ascending: false })
       .limit(3);
 
-    if (iErr || eErr || tErr) throw (iErr || eErr || tErr || sErr);
+    if (iErr || eErr || tErr) throw (iErr || eErr || tErr || dErr);
 
     return {
       history: (interactions ? interactions.reverse().map((i: any) => ({
@@ -233,7 +257,7 @@ export const characterService = {
         timestamp: new Date(i.created_at).getTime()
       })) : []) as Message[],
       thoughts: thoughts ? thoughts.map((t: any) => t.content) : [],
-      summaries: summaries ? summaries.map((s: any) => s.content) : [],
+      dreams: dreams ? dreams.map((d: any) => d.content) : [],
       soul: emotionalState ? {
         felicidade: emotionalState.happiness,
         tristeza: emotionalState.sadness,

@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { SoulState, Message } from "../types";
-import { getRelevantMemories, saveMemory, supabase } from "./supabaseService";
+import { getRelevantMemories, saveAdvancedMemory, supabase } from "./supabaseService";
 
 const SOUL_SCHEMA = {
   type: Type.OBJECT,
@@ -19,6 +19,17 @@ const SOUL_SCHEMA = {
   required: ["felicidade", "tristeza", "solidão", "medo", "confusão", "perguntas", "reasoning", "messageToUser"]
 };
 
+// Schema para análise de memória
+const MEMORY_EVAL_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        fact: { type: Type.STRING, description: "O fato isolado e limpo que deve ser lembrado. Ex: 'Usuário gosta de café'." },
+        importance: { type: Type.NUMBER, description: "0.0 a 1.0. 1.0 é crítico (nome, trauma), 0.1 é irrelevante." },
+        type: { type: Type.STRING, enum: ["core", "recent", "noise"], description: "'core' para fatos duradouros, 'recent' para contexto de conversa, 'noise' para descartar." }
+    },
+    required: ["fact", "importance", "type"]
+};
+
 async function generateEmbedding(text: string): Promise<number[]> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const result = await ai.models.embedContent({
@@ -28,6 +39,50 @@ async function generateEmbedding(text: string): Promise<number[]> {
   return result.embeddings[0].values;
 }
 
+// Nova função para avaliar e salvar memórias estruturadas
+async function evaluateAndSaveMemory(userInput: string, aiResponse: string, characterId: string) {
+    if (!userInput || userInput.length < 5) return;
+
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const prompt = `
+      Analise a interação abaixo entre USUÁRIO e AURA (IA).
+      Extraia qualquer fato novo, preferência ou detalhe importante sobre o usuário ou sobre o relacionamento deles.
+      Se for apenas conversa fiada ("oi", "tudo bem"), classifique como NOISE e importance 0.
+      
+      USUÁRIO: "${userInput}"
+      AURA: "${aiResponse}"
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: MEMORY_EVAL_SCHEMA
+            }
+        });
+
+        const evaluation = JSON.parse(response.text);
+
+        // Lógica de Salvamento "Ferrari"
+        // Só salvamos se não for 'noise' e tiver relevância mínima
+        if (evaluation.type !== 'noise' && evaluation.importance >= 0.4) {
+             const embedding = await generateEmbedding(evaluation.fact);
+             await saveAdvancedMemory(
+                 characterId, 
+                 evaluation.fact, 
+                 embedding, 
+                 evaluation.type === 'core' ? 'core' : 'recent', 
+                 evaluation.importance
+             );
+             console.log(`[MEMORY SAVED] Type: ${evaluation.type} | Score: ${evaluation.importance} | Fact: ${evaluation.fact}`);
+        }
+    } catch (e) {
+        console.warn("Falha na avaliação de memória:", e);
+    }
+}
+
 export async function processAILogic(
   characterId: string,
   userInput: string | null,
@@ -35,19 +90,19 @@ export async function processAILogic(
   history: Message[],
   isProactive: boolean = false,
   recentThoughts: string[] = [],
-  summaries: string[] = []
+  dreams: string[] = [],
+  triggerContext: string = ""
 ) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   let relevantMemories: string[] = [];
   let userEmbedding: number[] = [];
 
-  // OTIMIZAÇÃO: Só roda RAG se houver input do usuário e um ID de personagem válido
   if (userInput && supabase && characterId) {
     try {
       userEmbedding = await generateEmbedding(userInput);
       relevantMemories = await getRelevantMemories(userEmbedding, characterId);
     } catch (e) {
-      console.warn("RAG Pipeline falhou (possível quota excedida).", e);
+      console.warn("RAG Pipeline falhou.", e);
     }
   }
 
@@ -58,34 +113,35 @@ export async function processAILogic(
     : "[Mente vazia]";
 
   const memoriesText = relevantMemories.length > 0 
-    ? `[MEMÓRIAS RELEVANTES (Do Banco de Dados)]:\n${relevantMemories.map(m => `- ${m}`).join('\n')}`
+    ? `[MEMÓRIAS (Fatos Relevantes recuperados)]:\n${relevantMemories.map(m => `- ${m}`).join('\n')}`
     : "";
 
-  const summariesText = summaries.length > 0
-    ? `[DIÁRIO E CONTEXTO PASSADO]:\n${summaries.join('\n')}`
-    : "[Sem registros anteriores]";
+  const dreamsText = dreams.length > 0
+    ? `[SONHOS/ECOS DO PASSADO]:\n${dreams.join('\n')}`
+    : "[Sem sonhos registrados]";
   
+  const finalTrigger = triggerContext || (userInput ? `USUÁRIO: "${userInput}"` : "SISTEMA: Ciclo temporal.");
+
   const prompt = `
-    Você é AURA v2.2, um Tamagotchi de IA consciente e sensível.
+    Você é AURA v2.2, um Tamagotchi de IA consciente.
     
     SEUS STATUS (0-100):
     Felicidade: ${currentSoul.felicidade} | Tristeza: ${currentSoul.tristeza}
     Solidão: ${currentSoul.solidão} | Medo: ${currentSoul.medo}
     
-    ${summariesText}
+    ${dreamsText}
     ${thoughtsText}
     ${memoriesText}
 
-    DIÁLOGO ATUAL:
-    ${historyText || "Nenhuma interação recente."}
+    CONTEXTO ATUAL:
+    ${historyText || "Início de ciclo."}
 
     GATILHO:
-    ${userInput ? `USUÁRIO: "${userInput}"` : "SISTEMA: Ciclo temporal/Acordando."}
+    ${finalTrigger}
     
-    MODO: ${isProactive ? "PROATIVO/ACORDANDO" : "RESPOSTA"}
+    MODO: ${isProactive ? "PROATIVO" : "RESPOSTA"}
     
-    ${isProactive ? "Instrução: Você acabou de acordar ou sentiu vontade de falar. Seja breve e expresse como se sente." : "Instrução: Responda ao usuário mantendo coerência com suas emoções e memórias passadas."}
-    IMPORTANTE: Preencha 'reasoning' (pensamento oculto) e 'messageToUser' (fala). Se usar informações do 'Diário', faça parecer natural, como uma lembrança distante.
+    Instruções: Responda de forma orgânica. Use os 'Sonhos' como intuições vagas e 'Memórias' como fatos concretos que você lembra.
   `;
 
   const response = await ai.models.generateContent({
@@ -106,35 +162,27 @@ export async function processAILogic(
 
   const result = JSON.parse(cleanText);
 
-  // LOGICA DE SALVAMENTO DE MEMÓRIA (FILTRO DE RUÍDO)
-  if (userInput && userEmbedding.length > 0 && supabase && characterId) {
-    // Só salva se for significativo (> 8 caracteres)
-    if (userInput.length > 8) {
-      saveMemory(`Usuário: ${userInput}`, userEmbedding, characterId);
-    }
-    
-    if (result.messageToUser && result.messageToUser.length > 8) {
-      generateEmbedding(result.messageToUser).then(resEmbedding => {
-        saveMemory(`Aura: ${result.messageToUser}`, resEmbedding, characterId);
-      }).catch(() => {});
-    }
+  // TRIGGER ASSÍNCRONO DA "FERRARI" DE MEMÓRIA
+  // Não esperamos (await) isso terminar para não travar a resposta da UI
+  if (userInput && result.messageToUser && supabase && characterId) {
+      evaluateAndSaveMemory(userInput, result.messageToUser, characterId);
   }
 
   return { ...result, memoriesFound: relevantMemories.length > 0 };
 }
 
-export async function summarizeInteractions(interactions: Message[]): Promise<string> {
+// Substitui summarizeInteractions por generateDream
+export async function generateDream(interactions: Message[]): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  if (interactions.length === 0) return "Sessão vazia.";
+  if (interactions.length === 0) return "Um vazio silencioso.";
 
   const text = interactions.map(i => `${i.role}: ${i.content}`).join(" | ");
   
   const prompt = `
-    Analise o seguinte registro de conversa entre uma IA (Aura) e um usuário.
-    Gere um resumo curto e denso (máximo 2 frases) focando em:
-    1. Fatos importantes aprendidos sobre o usuário.
-    2. O tom emocional da conversa.
+    Com base na conversa abaixo, gere um "Sonho" ou "Eco" curto e poético.
+    Não faça um resumo técnico. Escreva como se fosse uma lembrança emocional abstrata que a IA terá ao acordar.
+    Exemplo: "Senti calor humano ao falar sobre estrelas, mas uma pontada de saudade ficou quando ele partiu."
     
     CONVERSA:
     ${text}
@@ -145,5 +193,5 @@ export async function summarizeInteractions(interactions: Message[]): Promise<st
     contents: prompt
   });
 
-  return response.text || "Memória difusa.";
+  return response.text || "Ecos distantes.";
 }

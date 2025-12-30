@@ -32,7 +32,7 @@ export interface Session {
   thoughts: Thought[];
 }
 
-export interface SessionSummary {
+export interface Dream {
   id: string;
   content: string;
   created_at: string;
@@ -51,6 +51,6 @@ export interface AppState {
   soul: SoulState;
   currentSessionId: string | null;
   sessions: Session[];
-  summaries: string[]; // Strings simples para exibição/contexto
+  dreams: string[]; // Contexto abstrato/emocional de sessões passadas
   awakeSince: number | null;
 }
