@@ -43,8 +43,8 @@ export interface CharacterDB {
   proactive_call_enabled: boolean;
 }
 
-export async function getRelevantMemories(embedding: number[], characterId: string = 'default-aura'): Promise<string[]> {
-  if (!supabase) return [];
+export async function getRelevantMemories(embedding: number[], characterId: string): Promise<string[]> {
+  if (!supabase || !characterId) return [];
   try {
     const { data, error } = await supabase.rpc('match_memories', {
       query_embedding: embedding,
@@ -60,8 +60,8 @@ export async function getRelevantMemories(embedding: number[], characterId: stri
   }
 }
 
-export async function saveMemory(content: string, embedding: number[], characterId: string = 'default-aura') {
-  if (!supabase) return;
+export async function saveMemory(content: string, embedding: number[], characterId: string) {
+  if (!supabase || !characterId) return;
   try {
     const { error } = await supabase.from('memories').insert({
       character_id: characterId,

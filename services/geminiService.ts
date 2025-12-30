@@ -29,6 +29,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 export async function processAILogic(
+  characterId: string,
   userInput: string | null,
   currentSoul: SoulState,
   history: Message[],
@@ -39,14 +40,13 @@ export async function processAILogic(
   let relevantMemories: string[] = [];
   let userEmbedding: number[] = [];
 
-  // OTIMIZAÇÃO: Só roda RAG se houver input do usuário. 
-  // Se for wake-up (proactive sem input), pula para ser rápido.
-  if (userInput && supabase) {
+  // OTIMIZAÇÃO: Só roda RAG se houver input do usuário e um ID de personagem válido
+  if (userInput && supabase && characterId) {
     try {
       userEmbedding = await generateEmbedding(userInput);
-      relevantMemories = await getRelevantMemories(userEmbedding);
+      relevantMemories = await getRelevantMemories(userEmbedding, characterId);
     } catch (e) {
-      console.warn("RAG Pipeline falhou (possível quota excedida).");
+      console.warn("RAG Pipeline falhou (possível quota excedida).", e);
     }
   }
 
@@ -100,11 +100,11 @@ export async function processAILogic(
 
   const result = JSON.parse(cleanText);
 
-  if (userInput && userEmbedding.length > 0 && supabase) {
-    saveMemory(`Usuário: ${userInput}`, userEmbedding);
+  if (userInput && userEmbedding.length > 0 && supabase && characterId) {
+    saveMemory(`Usuário: ${userInput}`, userEmbedding, characterId);
     if (result.messageToUser) {
       generateEmbedding(result.messageToUser).then(resEmbedding => {
-        saveMemory(`Aura: ${result.messageToUser}`, resEmbedding);
+        saveMemory(`Aura: ${result.messageToUser}`, resEmbedding, characterId);
       }).catch(() => {});
     }
   }

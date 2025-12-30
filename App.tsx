@@ -193,15 +193,33 @@ const App: React.FC = () => {
   }, [currentPage, characterId]);
 
   const checkApiKey = async () => {
-    const selected = await ((window as any).aistudio as AIStudio).hasSelectedApiKey();
-    setHasKey(selected);
-    if (selected) initApp();
+    const aiStudio = (window as any).aistudio as AIStudio | undefined;
+    if (aiStudio && typeof aiStudio.hasSelectedApiKey === 'function') {
+      try {
+        const selected = await aiStudio.hasSelectedApiKey();
+        setHasKey(selected);
+        if (selected) initApp();
+      } catch (e) {
+        console.warn("AI Studio check failed, assuming standalone deployment.");
+        setHasKey(true);
+        initApp();
+      }
+    } else {
+      // Standalone deployment fallback
+      setHasKey(true);
+      initApp();
+    }
   };
 
   const handleOpenKeySelector = async () => {
-    await ((window as any).aistudio as AIStudio).openSelectKey();
-    setHasKey(true);
-    initApp();
+    const aiStudio = (window as any).aistudio as AIStudio | undefined;
+    if (aiStudio && typeof aiStudio.openSelectKey === 'function') {
+      await aiStudio.openSelectKey();
+      setHasKey(true);
+      initApp();
+    } else {
+      alert("Seletor de chave não disponível neste ambiente. Certifique-se de que a API Key foi configurada no deploy.");
+    }
   };
 
   const handleLogout = () => {
@@ -268,7 +286,14 @@ const App: React.FC = () => {
       const currentHistory = currentSessionData?.interactions || [];
       const isProactiveCall = mode === 'proactive';
       
-      const aiResult = await processAILogic(userInput, state.soul, currentHistory, isProactiveCall, recentThoughts);
+      const aiResult = await processAILogic(
+        characterId,
+        userInput, 
+        state.soul, 
+        currentHistory, 
+        isProactiveCall, 
+        recentThoughts
+      );
 
       // 3. Atualiza Dados Local e Remoto
       const updatedSessions = [...state.sessions];
