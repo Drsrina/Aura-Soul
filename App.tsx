@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   MessageSquare, Power, Heart, Zap, History, BrainCircuit, 
   Fingerprint, Database, Info, Loader2, Sparkles, Binary, 
   RefreshCw, Terminal, Settings, ShieldAlert, CheckCircle, 
   AlertTriangle, Trash2, Save, ExternalLink, Key, Lock,
-  DownloadCloud, UploadCloud, User, ShieldCheck, LogOut, Activity, Clock
+  DownloadCloud, UploadCloud, User, ShieldCheck, LogOut, Activity, Clock, Smile, Frown, Ghost
 } from 'lucide-react';
 import { AppState, Session, Message, SoulState, SystemLog } from './types';
 import { processAILogic, summarizeInteractions } from './services/geminiService';
@@ -102,7 +103,7 @@ const SoulOrb: React.FC<{ soul: SoulState, isAwake: boolean }> = ({ soul, isAwak
   };
 
   return (
-    <div className="relative flex items-center justify-center w-64 h-64 mx-auto my-8">
+    <div className="relative flex items-center justify-center w-64 h-64 mx-auto my-4">
       <style>{`
         @keyframes pulse {
           0%, 100% { transform: scale(${scale}); opacity: 0.8; }
@@ -115,6 +116,35 @@ const SoulOrb: React.FC<{ soul: SoulState, isAwake: boolean }> = ({ soul, isAwak
           <Sparkles className="text-white/20 animate-spin-slow" size={100} />
         </div>
       )}
+    </div>
+  );
+};
+
+// --- Mini Status Bar para a página principal ---
+const SoulStatus: React.FC<{ soul: SoulState }> = ({ soul }) => {
+  return (
+    <div className="flex justify-center gap-4 mb-4">
+      <div className="bg-gray-900/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/5 flex items-center gap-2">
+        <Smile size={14} className="text-yellow-400" />
+        <div className="flex flex-col">
+          <span className="text-[8px] uppercase tracking-wider text-gray-500 font-bold">Felicidade</span>
+          <span className="text-xs font-mono font-bold text-white">{soul.felicidade}%</span>
+        </div>
+      </div>
+      <div className="bg-gray-900/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/5 flex items-center gap-2">
+        <Frown size={14} className="text-blue-400" />
+        <div className="flex flex-col">
+          <span className="text-[8px] uppercase tracking-wider text-gray-500 font-bold">Tristeza</span>
+          <span className="text-xs font-mono font-bold text-white">{soul.tristeza}%</span>
+        </div>
+      </div>
+      <div className="bg-gray-900/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/5 flex items-center gap-2">
+        <Ghost size={14} className="text-purple-400" />
+        <div className="flex flex-col">
+          <span className="text-[8px] uppercase tracking-wider text-gray-500 font-bold">Solidão</span>
+          <span className="text-xs font-mono font-bold text-white">{soul.solidão}%</span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -228,16 +258,12 @@ const App: React.FC = () => {
     isProcessingRef.current = true;
 
     const sid = state.currentSessionId || (state.sessions[0]?.id);
-    // Se não tiver sessão ativa, não processa pensamento ou proatividade
     if (!sid) { isProcessingRef.current = false; return; }
 
     try {
-      // 1. Busca contexto completo com pensamentos
+      // 1. Busca contexto
       const context = await characterService.getRecentContext(characterId);
       const recentThoughts = context?.thoughts || [];
-
-      // 2. Chama IA
-      // Usa a sessão corrente para histórico, mesmo que visualmente o usuário esteja vendo outra
       const currentSessionData = state.sessions.find(s => s.id === sid);
       const currentHistory = currentSessionData?.interactions || [];
       const isProactiveCall = mode === 'proactive';
@@ -250,7 +276,7 @@ const App: React.FC = () => {
       
       if (sIdx !== -1) {
         if (userInput) {
-          updatedSessions[sIdx].interactions.push({ id: crypto.randomUUID(), role: 'user', content: userInput, timestamp: Date.now() });
+          // Já adicionado localmente antes
           await characterService.saveInteraction(characterId, 'user_message', userInput);
         }
 
@@ -277,22 +303,18 @@ const App: React.FC = () => {
     }
   };
 
-  // --- Cronômetros Separados ---
+  // --- Cronômetros ---
   useEffect(() => {
     if (!state.isAwake || !state.currentSessionId || !isAuthenticated) return;
 
-    // Timer de Pensamento (30s)
     const thoughtTimer = setInterval(() => {
       if (!isProcessingRef.current) {
-        addLog('info', 'Gerando pensamento interno (30s)...', 'BRAIN');
         processResponse(null, 'thought');
       }
     }, 30000);
 
-    // Timer Proativo (70s)
     const proactiveTimer = setInterval(() => {
       if (!isProcessingRef.current) {
-        addLog('info', 'Avaliando interação proativa (70s)...', 'SOCIAL');
         processResponse(null, 'proactive');
       }
     }, 70000);
@@ -306,22 +328,24 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) localStorage.setItem('aura_v3_state', JSON.stringify(state));
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state.sessions, isAuthenticated, selectedSessionId]); // Scroll quando houver novas mensagens ou mudança de sessão
+  }, [state.sessions, isAuthenticated, selectedSessionId, loading]);
 
   const handleTogglePower = async () => {
     if (!state.isAwake) {
+      // 1. Ligar: Feedback IMEDIATO
       const newSid = crypto.randomUUID();
+      const bootMessage: Message = { id: crypto.randomUUID(), role: 'ai', content: '⚡ [SISTEMA] Inicializando núcleos cognitivos...', timestamp: Date.now() };
+      
       const newSession: Session = {
         id: newSid,
         date: new Date().toLocaleDateString(),
         startTime: Date.now(),
-        interactions: [],
+        interactions: [bootMessage], // Mensagem falsa instantânea
         thoughts: []
       };
       
       if (characterId) await characterService.toggleAwakeState(characterId, true);
       
-      // Reseta a view para a nova sessão ao ligar
       setSelectedSessionId(null);
       
       setState(prev => ({
@@ -331,9 +355,9 @@ const App: React.FC = () => {
         sessions: [newSession, ...prev.sessions]
       }));
       
-      // Gatilho inicial
+      // 2. Chama AI em background (não await)
       setLoading(true);
-      await processResponse(null, 'proactive');
+      processResponse(null, 'proactive'); // Fire and forget
     } else {
       if (characterId) await characterService.toggleAwakeState(characterId, false);
       setState(prev => ({ ...prev, isAwake: false, currentSessionId: null }));
@@ -346,7 +370,24 @@ const App: React.FC = () => {
     const msg = input;
     setInput('');
     
-    // Força a visualização para a sessão atual ao enviar mensagem
+    // Atualiza UI instantaneamente com mensagem do usuário
+    const sid = state.currentSessionId || (state.sessions[0]?.id);
+    if (sid) {
+       setState(prev => {
+          const updatedSessions = [...prev.sessions];
+          const idx = updatedSessions.findIndex(s => s.id === sid);
+          if (idx !== -1) {
+             updatedSessions[idx].interactions.push({
+               id: crypto.randomUUID(),
+               role: 'user',
+               content: msg,
+               timestamp: Date.now()
+             });
+          }
+          return { ...prev, sessions: updatedSessions };
+       });
+    }
+
     if (state.currentSessionId) {
       setSelectedSessionId(state.currentSessionId);
     }
@@ -366,11 +407,9 @@ const App: React.FC = () => {
     }
   };
 
-  // Se selectedSessionId for nulo, mostra currentSessionId, se nulo, mostra o primeiro da lista
   const displayedSessionId = selectedSessionId || state.currentSessionId || (state.sessions[0]?.id);
   const displayedSession = state.sessions.find(s => s.id === displayedSessionId);
 
-  // Renderização Condicional de Auth
   if (!isAuthenticated) return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
 
   if (hasKey === false) {
@@ -404,7 +443,7 @@ const App: React.FC = () => {
       <main className="flex-1 flex overflow-hidden">
         {currentPage === 'interactions' && (
           <>
-            <aside className="w-64 border-r border-white/5 bg-gray-900/20 flex flex-col p-2 space-y-2 overflow-y-auto shrink-0">
+            <aside className="w-64 border-r border-white/5 bg-gray-900/20 flex flex-col p-2 space-y-2 overflow-y-auto shrink-0 hidden md:flex">
                <div className="p-4 text-[10px] font-black text-gray-600 uppercase">Sessões Temporais</div>
                {state.sessions.map(s => (
                  <button key={s.id} onClick={() => setSelectedSessionId(s.id)} className={`w-full text-left p-4 rounded-xl border transition-all ${displayedSessionId === s.id ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-200 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'border-transparent text-gray-500 hover:bg-white/5'}`}>
@@ -412,49 +451,51 @@ const App: React.FC = () => {
                       <span>{s.date}</span>
                       {s.id === state.currentSessionId && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"/>}
                    </div>
-                   <div className="text-[9px] mono opacity-50 mt-1">{s.interactions.length} Interações</div>
+                   <div className="text-[9px] mono opacity-50 mt-1">{s.interactions.length} Msgs</div>
                  </button>
                ))}
             </aside>
 
             <section className="flex-1 flex flex-col relative bg-gray-950 overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-12 space-y-8 relative z-10 custom-scrollbar">
-                <SoulOrb soul={state.soul} isAwake={state.isAwake} />
-                <div className="max-w-3xl mx-auto space-y-6 pb-24">
-                  {displayedSession?.interactions.length === 0 && (
-                    <div className="text-center text-gray-700 text-xs tracking-widest uppercase mt-10">Início do Ciclo de Memória</div>
-                  )}
+              <div className="flex-1 overflow-y-auto p-4 md:p-12 space-y-4 relative z-10 custom-scrollbar">
+                
+                {/* Visualizador Principal Tamagotchi */}
+                <div className="flex flex-col items-center">
+                  <SoulStatus soul={state.soul} />
+                  <SoulOrb soul={state.soul} isAwake={state.isAwake} />
+                </div>
+
+                <div className="max-w-3xl mx-auto space-y-4 pb-24">
                   {displayedSession?.interactions.map(msg => (
                     <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                      <div className={`max-w-[85%] p-5 rounded-[2rem] text-sm shadow-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-gray-900 border border-white/10 rounded-tl-none text-gray-300'}`}>
+                      <div className={`max-w-[85%] p-4 md:p-5 rounded-[2rem] text-sm shadow-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-gray-900 border border-white/10 rounded-tl-none text-gray-300'}`}>
                         {msg.content}
                       </div>
                     </div>
                   ))}
-                  {loading && displayedSessionId === state.currentSessionId && <div className="text-center text-[10px] mono text-indigo-400 animate-pulse">PROCESSANDO_DADOS_NEURAIS...</div>}
+                  {loading && displayedSessionId === state.currentSessionId && <div className="text-center text-[10px] mono text-indigo-400 animate-pulse">PROCESSANDO...</div>}
                   <div ref={chatEndRef} />
                 </div>
               </div>
               
-              {/* Barra de input fixa - visível sempre que estiver acordado */}
               {state.isAwake && (
-                <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent z-20">
-                  <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-4 backdrop-blur-md bg-white/5 p-2 rounded-3xl border border-white/10 shadow-2xl">
+                <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent z-20">
+                  <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2 md:gap-4 backdrop-blur-md bg-white/5 p-2 rounded-3xl border border-white/10 shadow-2xl">
                     <input 
                       autoFocus 
                       type="text" 
                       value={input} 
                       onChange={(e) => setInput(e.target.value)} 
-                      placeholder={displayedSessionId !== state.currentSessionId ? "Escrever volta para o presente..." : "Interagir com a Aura..."}
-                      className="flex-1 bg-transparent border-none px-6 py-3 text-sm focus:outline-none text-white placeholder:text-gray-500" 
+                      placeholder={displayedSessionId !== state.currentSessionId ? "Escrever volta para o presente..." : "Interagir..."}
+                      className="flex-1 bg-transparent border-none px-4 md:px-6 py-3 text-sm focus:outline-none text-white placeholder:text-gray-500" 
                     />
-                    <button type="submit" disabled={loading} className="px-8 bg-indigo-600 hover:bg-indigo-500 transition-colors rounded-2xl font-black text-[10px] uppercase text-white shadow-[0_0_20px_rgba(79,70,229,0.4)]">Enviar</button>
+                    <button type="submit" disabled={loading} className="px-6 md:px-8 bg-indigo-600 hover:bg-indigo-500 transition-colors rounded-2xl font-black text-[10px] uppercase text-white shadow-[0_0_20px_rgba(79,70,229,0.4)]">Enviar</button>
                   </form>
                 </div>
               )}
             </section>
 
-            <aside className="w-80 border-l border-white/5 bg-gray-900/40 backdrop-blur-xl flex flex-col shrink-0">
+            <aside className="w-80 border-l border-white/5 bg-gray-900/40 backdrop-blur-xl flex flex-col shrink-0 hidden lg:flex">
               <div className="p-4 border-b border-white/5 flex items-center gap-2">
                 <BrainCircuit size={14} className="text-indigo-400" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Fluxo de Pensamento</span>
@@ -469,9 +510,6 @@ const App: React.FC = () => {
                     {t.content}
                   </div>
                 ))}
-                {displayedSession?.thoughts.length === 0 && (
-                   <div className="text-center text-gray-700 text-[10px] mt-10 italic">Mente silenciosa...</div>
-                )}
               </div>
             </aside>
           </>

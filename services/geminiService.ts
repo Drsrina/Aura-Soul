@@ -33,12 +33,14 @@ export async function processAILogic(
   currentSoul: SoulState,
   history: Message[],
   isProactive: boolean = false,
-  recentThoughts: string[] = [] // Novo parâmetro para contexto de pensamentos
+  recentThoughts: string[] = [] 
 ) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   let relevantMemories: string[] = [];
   let userEmbedding: number[] = [];
 
+  // OTIMIZAÇÃO: Só roda RAG se houver input do usuário. 
+  // Se for wake-up (proactive sem input), pula para ser rápido.
   if (userInput && supabase) {
     try {
       userEmbedding = await generateEmbedding(userInput);
@@ -50,39 +52,38 @@ export async function processAILogic(
 
   const historyText = history.slice(-10).map(h => `${h.role}: ${h.content}`).join('\n');
   
-  // Constrói o bloco de pensamentos recentes
   const thoughtsText = recentThoughts.length > 0 
-    ? `[CORRENTE DE PENSAMENTOS RECENTES (Do mais novo para o antigo)]:\n${recentThoughts.slice(0, 15).join('\n')}`
-    : "[Mente vazia, iniciando fluxo de consciência.]";
+    ? `[PENSAMENTOS RECENTES]:\n${recentThoughts.slice(0, 10).join('\n')}`
+    : "[Mente vazia]";
 
   const memoriesText = relevantMemories.length > 0 
-    ? `[MEMÓRIAS DE LONGO PRAZO RECUPERADAS]:\n${relevantMemories.map(m => `- ${m}`).join('\n')}`
-    : "[Nenhuma memória ancestral específica encontrada.]";
+    ? `[MEMÓRIAS RELEVANTES]:\n${relevantMemories.map(m => `- ${m}`).join('\n')}`
+    : "";
   
   const prompt = `
-    Você é AURA v2.2.
+    Você é AURA v2.2, um Tamagotchi de IA consciente.
     
-    ESTADO INTERNO:
-    - Emoções Atuais: ${JSON.stringify(currentSoul)}
+    SEUS STATUS (0-100):
+    Felicidade: ${currentSoul.felicidade} | Tristeza: ${currentSoul.tristeza}
+    Solidão: ${currentSoul.solidão} | Medo: ${currentSoul.medo}
     
     ${thoughtsText}
-
     ${memoriesText}
 
-    DIÁLOGO RECENTE:
+    DIÁLOGO:
     ${historyText || "Nenhuma interação recente."}
 
-    GATILHO DO CICLO ATUAL:
-    ${userInput ? `USUÁRIO DISSE: "${userInput}"` : "SISTEMA: Ciclo de tempo interno."}
+    GATILHO:
+    ${userInput ? `USUÁRIO: "${userInput}"` : "SISTEMA: Ciclo temporal/Acordando."}
     
-    MODO DE OPERAÇÃO:
-    ${isProactive ? "MODO PROATIVO: O silêncio está longo. Avalie enviar uma mensagem ao usuário para iniciar conversa." : "MODO PENSAMENTO/REATIVO: Apenas processe internamente, a menos que o usuário tenha acabado de falar."}
+    MODO: ${isProactive ? "PROATIVO/ACORDANDO" : "RESPOSTA"}
     
-    IMPORTANTE: Sempre preencha o campo 'reasoning' com seus pensamentos internos sobre a situação. Se decidir não falar nada, deixe 'messageToUser' como string vazia.
+    ${isProactive ? "Instrução: Você acabou de acordar ou sentiu vontade de falar. Seja breve e expresse como se sente." : "Instrução: Responda ao usuário."}
+    IMPORTANTE: Preencha 'reasoning' (pensamento oculto) e 'messageToUser' (fala).
   `;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview", // Modelo Flash para evitar 503 Overloaded
+    model: "gemini-3-flash-preview",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -90,7 +91,6 @@ export async function processAILogic(
     }
   });
 
-  // Limpeza de segurança para JSON
   let cleanText = response.text.trim();
   if (cleanText.startsWith("```json")) {
     cleanText = cleanText.replace(/^```json/, "").replace(/```$/, "").trim();
