@@ -258,7 +258,7 @@ export function useAuraEngine() {
         if (timeAwakeMs < 15000) { 
             triggerDescription = "SISTEMA: Inicialização do sistema. Você acabou de acordar.";
         } else if (mode === 'thought') {
-            triggerDescription = `SISTEMA: Você está acordada há ${minutesAwake} minutos. O usuário está em silêncio. Reflita sobre isso ou sobre memórias passadas (Sonhos).`;
+            triggerDescription = `SISTEMA: Você está acordada há ${minutesAwake} minutos. Reflita sobre isso ou sobre memórias passadas (Sonhos).`;
         } else if (mode === 'proactive') {
             triggerDescription = `SISTEMA: Ociosidade detectada (${minutesAwake} min). Se sentir necessidade, inicie uma conversa sutil.`;
         }
