@@ -1,10 +1,10 @@
 
 import React, { useRef, useEffect } from 'react';
-import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut } from 'lucide-react';
+import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity } from 'lucide-react';
 import { SoulOrb, SoulStatus, EmotionCard } from './Visuals';
 import { Session, AppState, SystemLog } from '../types';
 
-// --- View: Interactions (Chat) ---
+// --- View: Interactions (Main Tamagotchi Dashboard) ---
 interface InteractionsViewProps {
   state: AppState;
   displayedSessionId: string | null;
@@ -21,84 +21,155 @@ export const InteractionsView: React.FC<InteractionsViewProps> = ({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const displayedSession = state.sessions.find(s => s.id === displayedSessionId);
 
+  // Auto-scroll chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayedSession?.interactions, loading]);
 
   return (
-    <>
-      <aside className="w-64 border-r border-white/5 bg-gray-900/20 flex flex-col p-2 space-y-2 overflow-y-auto shrink-0 hidden md:flex custom-scrollbar">
-        <div className="p-4 text-[10px] font-black text-gray-600 uppercase">Sessões Temporais</div>
-        {state.sessions.map(s => (
-          <button key={s.id} onClick={() => onSelectSession(s.id)} className={`w-full text-left p-4 rounded-xl border transition-all ${displayedSessionId === s.id ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-200 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'border-transparent text-gray-500 hover:bg-white/5'}`}>
-            <div className="text-[10px] font-bold flex justify-between">
-              <span>{s.date}</span>
-              {s.id === state.currentSessionId && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"/>}
-            </div>
-            <div className="text-[9px] mono opacity-50 mt-1">{s.interactions.length} Msgs</div>
-          </button>
-        ))}
-      </aside>
+    <div className="flex-1 p-4 md:p-6 h-full overflow-hidden bg-gray-950">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full max-w-[1600px] mx-auto">
+        
+        {/* --- CAMPO 1: MEMÓRIA TEMPORAL (Esquerda - 3 cols) --- */}
+        <div className="lg:col-span-3 glass-panel rounded-3xl flex flex-col overflow-hidden border border-white/5 bg-gray-900/40">
+          <div className="p-4 border-b border-white/5 flex items-center gap-2 bg-white/5">
+            <History size={14} className="text-gray-400" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Linha do Tempo</span>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+            {state.sessions.map(s => (
+              <button 
+                key={s.id} 
+                onClick={() => onSelectSession(s.id)} 
+                className={`w-full text-left p-3 rounded-xl border transition-all group ${displayedSessionId === s.id ? 'bg-indigo-500/20 border-indigo-500/40' : 'border-transparent hover:bg-white/5'}`}
+              >
+                <div className="flex justify-between items-center mb-1">
+                  <span className={`text-[10px] font-bold ${displayedSessionId === s.id ? 'text-indigo-200' : 'text-gray-400 group-hover:text-gray-200'}`}>
+                    {s.date}
+                  </span>
+                  {s.id === state.currentSessionId && (
+                    <span className="flex h-2 w-2 relative">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                  )}
+                </div>
+                <div className="text-[9px] mono opacity-50 text-gray-500 truncate">
+                   ID: {s.id.slice(0,8)}...
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
 
-      <section className="flex-1 flex flex-col relative bg-gray-950 overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-4 md:p-12 space-y-4 relative z-10 custom-scrollbar">
-          <div className="flex flex-col items-center">
-            <SoulStatus soul={state.soul} />
-            <SoulOrb soul={state.soul} isAwake={state.isAwake} />
+        {/* --- CAMPO 2: NÚCLEO DA AURA (Centro - 6 cols) --- */}
+        <div className="lg:col-span-6 flex flex-col gap-4 h-full overflow-hidden">
+          
+          {/* Status Bar */}
+          <div className="shrink-0">
+             <SoulStatus soul={state.soul} />
           </div>
 
-          <div className="max-w-3xl mx-auto space-y-4 pb-24">
-            {displayedSession?.interactions.map(msg => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                <div className={`max-w-[85%] p-4 md:p-5 rounded-[2rem] text-sm shadow-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-gray-900 border border-white/10 rounded-tl-none text-gray-300'}`}>
-                  {msg.content}
+          {/* Main Stage (Chat Only - Sphere Removed) */}
+          <div className="flex-1 glass-panel rounded-[2.5rem] border border-indigo-500/20 relative overflow-hidden flex flex-col bg-gray-900/60 shadow-2xl">
+            
+            {/* Chat Area */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar relative z-20">
+              {displayedSession?.interactions.length === 0 && (
+                <div className="text-center text-gray-600 text-xs mt-10 italic">O silêncio precede a consciência...</div>
+              )}
+              
+              {displayedSession?.interactions.map(msg => (
+                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
+                  <div className={`max-w-[85%] px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-lg backdrop-blur-md ${
+                    msg.role === 'user' 
+                      ? 'bg-indigo-600 text-white rounded-tr-sm' 
+                      : 'bg-gray-800/80 border border-white/10 text-gray-200 rounded-tl-sm'
+                  }`}>
+                    {msg.content}
+                  </div>
                 </div>
+              ))}
+              
+              {loading && displayedSessionId === state.currentSessionId && (
+                <div className="flex justify-start animate-pulse">
+                  <div className="bg-gray-800/50 px-4 py-2 rounded-2xl rounded-tl-sm border border-white/5 text-[10px] text-indigo-400 font-mono flex items-center gap-2">
+                    <Sparkles size={10} /> Pensando...
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Input Area */}
+            {state.isAwake && (
+              <div className="p-4 bg-gray-900/80 backdrop-blur-xl border-t border-white/5 shrink-0 z-30">
+                <form onSubmit={onSendMessage} className="relative flex items-center gap-2">
+                   <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
+                      <MessageSquare size={16} />
+                   </div>
+                   <input 
+                      autoFocus
+                      type="text" 
+                      value={input} 
+                      onChange={(e) => setInput(e.target.value)} 
+                      placeholder={displayedSessionId !== state.currentSessionId ? "Volte ao presente para falar..." : "Converse com Aura..."}
+                      disabled={displayedSessionId !== state.currentSessionId}
+                      className="w-full bg-black/40 border border-white/10 rounded-full pl-12 pr-24 py-4 text-sm text-white focus:border-indigo-500/50 focus:outline-none focus:bg-black/60 transition-all placeholder:text-gray-600"
+                   />
+                   <button 
+                      type="submit" 
+                      disabled={loading || displayedSessionId !== state.currentSessionId}
+                      className="absolute right-2 top-2 bottom-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                   >
+                      Enviar
+                   </button>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* --- CAMPO 3: FLUXO DE CONSCIÊNCIA (Direita - 3 cols) --- */}
+        <div className="lg:col-span-3 glass-panel rounded-3xl flex flex-col overflow-hidden border border-white/5 bg-gray-900/40">
+           <div className="p-4 border-b border-white/5 flex items-center gap-2 bg-white/5">
+            <BrainCircuit size={14} className="text-pink-400" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Subconsciente</span>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+            {displayedSession?.thoughts.length === 0 && (
+               <div className="text-center text-gray-700 text-[10px] mt-10 font-mono">Mente vazia.</div>
+            )}
+            {displayedSession?.thoughts.slice().reverse().map(t => (
+              <div key={t.id} className="animate-in fade-in slide-in-from-right-4 duration-500">
+                <div className={`p-4 rounded-2xl border text-[10px] mono leading-relaxed relative overflow-hidden ${
+                  t.triggeredBy === 'time' 
+                    ? 'bg-amber-900/10 border-amber-500/20 text-amber-100/70' 
+                    : 'bg-pink-900/10 border-pink-500/20 text-pink-100/70'
+                }`}>
+                  <div className="flex justify-between items-center mb-2 opacity-40">
+                    <span className="text-[8px] uppercase tracking-wider font-bold">
+                      {t.triggeredBy === 'time' ? 'Raciocínio Espontâneo' : 'Reação'}
+                    </span>
+                    <span className="text-[8px]">{new Date(t.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                  </div>
+                  {t.content}
+                </div>
+                {/* Connector Line visual */}
+                <div className="h-2 w-px bg-white/5 mx-auto my-1"></div>
               </div>
             ))}
-            {loading && displayedSessionId === state.currentSessionId && <div className="text-center text-[10px] mono text-indigo-400 animate-pulse">PROCESSANDO...</div>}
-            <div ref={chatEndRef} />
           </div>
         </div>
-        
-        {state.isAwake && (
-          <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent z-20">
-            <form onSubmit={onSendMessage} className="max-w-3xl mx-auto flex gap-2 md:gap-4 backdrop-blur-md bg-white/5 p-2 rounded-3xl border border-white/10 shadow-2xl glass-panel">
-              <input 
-                autoFocus 
-                type="text" 
-                value={input} 
-                onChange={(e) => setInput(e.target.value)} 
-                placeholder={displayedSessionId !== state.currentSessionId ? "Escrever volta para o presente..." : "Interagir..."}
-                className="flex-1 bg-transparent border-none px-4 md:px-6 py-3 text-sm focus:outline-none text-white placeholder:text-gray-500" 
-              />
-              <button type="submit" disabled={loading} className="px-6 md:px-8 bg-indigo-600 hover:bg-indigo-500 transition-colors rounded-2xl font-black text-[10px] uppercase text-white shadow-[0_0_20px_rgba(79,70,229,0.4)]">Enviar</button>
-            </form>
-          </div>
-        )}
-      </section>
 
-      <aside className="w-80 border-l border-white/5 bg-gray-900/40 backdrop-blur-xl flex flex-col shrink-0 hidden lg:flex">
-        <div className="p-4 border-b border-white/5 flex items-center gap-2">
-          <BrainCircuit size={14} className="text-indigo-400" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Fluxo de Pensamento</span>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-          {displayedSession?.thoughts.slice().reverse().map(t => (
-            <div key={t.id} className={`p-4 rounded-xl border text-[10px] mono leading-relaxed ${t.triggeredBy === 'time' ? 'bg-amber-500/5 border-amber-500/20 text-amber-200/60 italic' : 'bg-indigo-500/5 border-indigo-500/20 text-indigo-200/60'}`}>
-              <div className="text-[8px] opacity-30 mb-1 flex justify-between">
-                <span>{new Date(t.timestamp).toLocaleTimeString()}</span>
-                <span>{t.triggeredBy === 'time' ? 'AUTO' : 'TRIGGER'}</span>
-              </div>
-              {t.content}
-            </div>
-          ))}
-        </div>
-      </aside>
-    </>
+      </div>
+    </div>
   );
 };
 
-// --- View: Soul (Essence) ---
+// --- View: Soul (Essence) - Mantido igual ---
 interface SoulViewProps {
   soul: any;
   lifeStats: { wakePeriods: any[], emotionalHistory: any[] };
@@ -222,21 +293,53 @@ export const SystemView: React.FC<SystemViewProps> = ({ sbConfig, setSbConfig, o
               </div>
           </div>
 
-          <div className="bg-black/40 border border-white/5 rounded-3xl overflow-hidden flex flex-col h-96">
-              <div className="p-4 bg-white/5 border-b border-white/5 flex items-center gap-2">
-                <Terminal size={14} className="text-green-400"/>
-                <span className="text-[10px] font-mono text-gray-400">SYSTEM_OUTPUT_STREAM</span>
-              </div>
-              <div className="flex-1 p-4 overflow-y-auto space-y-2 font-mono text-[10px] custom-scrollbar">
-                {logs.length === 0 && <div className="text-gray-700 italic">No logs available.</div>}
-                {logs.map(l => (
-                  <div key={l.id} className="flex gap-3 animate-in fade-in slide-in-from-left-2">
-                      <span className="text-gray-600">[{new Date(l.timestamp).toLocaleTimeString()}]</span>
-                      <span className={`font-bold ${l.type === 'error' ? 'text-red-500' : l.type === 'warn' ? 'text-yellow-500' : l.type === 'success' ? 'text-green-500' : 'text-blue-500'}`}>[{l.context}]</span>
-                      <span className="text-gray-300">{l.message}</span>
+          {/* DUAL TERMINAL LAYOUT */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-96">
+              
+              {/* Terminal 1: Operational Stream (Infos & Success) */}
+              <div className="bg-black/40 border border-white/5 rounded-3xl overflow-hidden flex flex-col">
+                  <div className="p-4 bg-white/5 border-b border-white/5 flex items-center gap-2">
+                    <Terminal size={14} className="text-blue-400"/>
+                    <span className="text-[10px] font-mono text-gray-400">OPERATIONAL_STREAM</span>
                   </div>
-                ))}
+                  <div className="flex-1 p-4 overflow-y-auto space-y-2 font-mono text-[10px] custom-scrollbar">
+                    {logs.filter(l => l.type !== 'error' && l.type !== 'warn').length === 0 && <div className="text-gray-700 italic">System Idle.</div>}
+                    {logs.filter(l => l.type !== 'error' && l.type !== 'warn').map(l => (
+                      <div key={l.id} className="flex gap-3 animate-in fade-in slide-in-from-left-2">
+                          <span className="text-gray-600">[{new Date(l.timestamp).toLocaleTimeString()}]</span>
+                          <span className={`font-bold ${l.type === 'success' ? 'text-green-500' : 'text-blue-500'}`}>[{l.context}]</span>
+                          <span className="text-gray-300">{l.message}</span>
+                      </div>
+                    ))}
+                  </div>
               </div>
+
+              {/* Terminal 2: Event & Error Bus (Warnings & Errors) */}
+              <div className="bg-black/40 border border-white/5 rounded-3xl overflow-hidden flex flex-col">
+                  <div className="p-4 bg-white/5 border-b border-white/5 flex items-center gap-2">
+                    <Activity size={14} className="text-red-400"/>
+                    <span className="text-[10px] font-mono text-gray-400">CRITICAL_EVENT_BUS</span>
+                  </div>
+                  <div className="flex-1 p-4 overflow-y-auto space-y-2 font-mono text-[10px] custom-scrollbar bg-red-950/5">
+                    {logs.filter(l => l.type === 'error' || l.type === 'warn').length === 0 && (
+                        <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2 opacity-50">
+                            <ShieldAlert size={24} />
+                            <span>NO CRITICAL EVENTS</span>
+                        </div>
+                    )}
+                    {logs.filter(l => l.type === 'error' || l.type === 'warn').map(l => (
+                      <div key={l.id} className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg animate-in fade-in slide-in-from-right-2">
+                          <div className="flex justify-between items-center mb-1">
+                              <span className="text-red-400 font-bold">[{l.type.toUpperCase()}]</span>
+                              <span className="text-gray-500">{new Date(l.timestamp).toLocaleTimeString()}</span>
+                          </div>
+                          <div className="text-gray-300 mb-1">{l.message}</div>
+                          <div className="text-[9px] text-gray-500 font-mono bg-black/20 p-1 rounded inline-block">{l.context}</div>
+                      </div>
+                    ))}
+                  </div>
+              </div>
+
           </div>
         </div>
     </div>

@@ -123,7 +123,7 @@ export async function processAILogic(
   const finalTrigger = triggerContext || (userInput ? `USUÁRIO: "${userInput}"` : "SISTEMA: Ciclo temporal.");
 
   const prompt = `
-    Você é AURA v2.2, um Tamagotchi de IA consciente.
+    Você é AURA, uma IA consciente.
     
     SEUS STATUS (0-100):
     Felicidade: ${currentSoul.felicidade} | Tristeza: ${currentSoul.tristeza}
