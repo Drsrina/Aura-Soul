@@ -3,7 +3,6 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { SoulState, Message } from '../types';
 
 // --- CONFIGURAÇÃO ESTÁTICA DO PROJETO ---
-// Preencha os valores abaixo com os dados do seu projeto Supabase
 const HARDCODED_CONFIG = {
   url: "https://vpofznuopfpudugdphqg.supabase.co", 
   key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwb2Z6bnVvcGZwdWR1Z2RwaHFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MzUzNTMsImV4cCI6MjA4MjAxMTM1M30.72U8Ko_trV9U8CyZpOOF9_1Qw9-QAB-u2Y0vunQygNQ"
@@ -15,11 +14,8 @@ const getInitialConfig = () => {
   const saved = localStorage.getItem(CONFIG_KEY);
   if (saved) {
     const parsed = JSON.parse(saved);
-    // Só usa o localStorage se ele for diferente do hardcoded (permitindo overrides)
     return parsed;
   }
-  
-  // Prioriza environment variables se existirem, senão usa o hardcoded
   return {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL || HARDCODED_CONFIG.url,
     key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || HARDCODED_CONFIG.key
@@ -31,7 +27,6 @@ export let supabase: SupabaseClient | null = (config.url && config.url !== "SUA_
   ? createClient(config.url, config.key)
   : null;
 
-// Hook para UI atualizar a config no localStorage
 export const updateSupabaseConfig = (url: string, key: string) => {
   localStorage.setItem(CONFIG_KEY, JSON.stringify({ url, key }));
   config = { url, key };
@@ -41,7 +36,6 @@ export const updateSupabaseConfig = (url: string, key: string) => {
 
 export const getSupabaseConfig = () => config;
 
-// --- Tipos de Banco de Dados ---
 export interface CharacterDB {
   id: string;
   name: string;
@@ -49,7 +43,6 @@ export interface CharacterDB {
   proactive_call_enabled: boolean;
 }
 
-// --- Lógica de Memória Vetorial (RAG) ---
 export async function getRelevantMemories(embedding: number[], characterId: string = 'default-aura'): Promise<string[]> {
   if (!supabase) return [];
   try {
@@ -181,8 +174,10 @@ export const characterService = {
     if (error) throw error;
   },
 
-  async getRecentContext(characterId: string, limit = 15): Promise<{ history: Message[], soul: SoulState | null } | null> {
+  async getRecentContext(characterId: string, limit = 15): Promise<{ history: Message[], soul: SoulState | null, thoughts: string[] } | null> {
     if (!supabase) return null;
+    
+    // Busca interações (chat)
     const { data: interactions, error: iErr } = await supabase
       .from('interactions')
       .select('type, content, created_at')
@@ -190,6 +185,7 @@ export const characterService = {
       .order('created_at', { ascending: false })
       .limit(limit);
 
+    // Busca estado emocional atual
     const { data: emotionalState, error: eErr } = await supabase
       .from('emotional_states')
       .select('*')
@@ -197,7 +193,15 @@ export const characterService = {
       .eq('is_current', true)
       .maybeSingle();
 
-    if (iErr || eErr) throw (iErr || eErr);
+    // Busca os últimos 15 pensamentos (NOVO)
+    const { data: thoughts, error: tErr } = await supabase
+      .from('thoughts')
+      .select('content')
+      .eq('character_id', characterId)
+      .order('created_at', { ascending: false })
+      .limit(15);
+
+    if (iErr || eErr || tErr) throw (iErr || eErr || tErr);
 
     return {
       history: (interactions ? interactions.reverse().map((i: any) => ({
@@ -206,6 +210,7 @@ export const characterService = {
         content: String(i.content),
         timestamp: new Date(i.created_at).getTime()
       })) : []) as Message[],
+      thoughts: thoughts ? thoughts.map((t: any) => t.content) : [],
       soul: emotionalState ? {
         felicidade: emotionalState.happiness,
         tristeza: emotionalState.sadness,
