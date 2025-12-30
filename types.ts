@@ -5,7 +5,6 @@ export interface SoulState {
   solidão: number;
   medo: number;
   confusão: number;
-  curiosidade: number;
   perguntas: string[];
   visual_cue?: string;
 }
