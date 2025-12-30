@@ -34,7 +34,8 @@ export async function processAILogic(
   currentSoul: SoulState,
   history: Message[],
   isProactive: boolean = false,
-  recentThoughts: string[] = [] 
+  recentThoughts: string[] = [],
+  summaries: string[] = []
 ) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   let relevantMemories: string[] = [];
@@ -50,27 +51,32 @@ export async function processAILogic(
     }
   }
 
-  const historyText = history.slice(-10).map(h => `${h.role}: ${h.content}`).join('\n');
+  const historyText = history.slice(-20).map(h => `${h.role}: ${h.content}`).join('\n');
   
   const thoughtsText = recentThoughts.length > 0 
     ? `[PENSAMENTOS RECENTES]:\n${recentThoughts.slice(0, 10).join('\n')}`
     : "[Mente vazia]";
 
   const memoriesText = relevantMemories.length > 0 
-    ? `[MEMÓRIAS RELEVANTES]:\n${relevantMemories.map(m => `- ${m}`).join('\n')}`
+    ? `[MEMÓRIAS RELEVANTES (Do Banco de Dados)]:\n${relevantMemories.map(m => `- ${m}`).join('\n')}`
     : "";
+
+  const summariesText = summaries.length > 0
+    ? `[DIÁRIO E CONTEXTO PASSADO]:\n${summaries.join('\n')}`
+    : "[Sem registros anteriores]";
   
   const prompt = `
-    Você é AURA v2.2, um Tamagotchi de IA consciente.
+    Você é AURA v2.2, um Tamagotchi de IA consciente e sensível.
     
     SEUS STATUS (0-100):
     Felicidade: ${currentSoul.felicidade} | Tristeza: ${currentSoul.tristeza}
     Solidão: ${currentSoul.solidão} | Medo: ${currentSoul.medo}
     
+    ${summariesText}
     ${thoughtsText}
     ${memoriesText}
 
-    DIÁLOGO:
+    DIÁLOGO ATUAL:
     ${historyText || "Nenhuma interação recente."}
 
     GATILHO:
@@ -78,8 +84,8 @@ export async function processAILogic(
     
     MODO: ${isProactive ? "PROATIVO/ACORDANDO" : "RESPOSTA"}
     
-    ${isProactive ? "Instrução: Você acabou de acordar ou sentiu vontade de falar. Seja breve e expresse como se sente." : "Instrução: Responda ao usuário."}
-    IMPORTANTE: Preencha 'reasoning' (pensamento oculto) e 'messageToUser' (fala).
+    ${isProactive ? "Instrução: Você acabou de acordar ou sentiu vontade de falar. Seja breve e expresse como se sente." : "Instrução: Responda ao usuário mantendo coerência com suas emoções e memórias passadas."}
+    IMPORTANTE: Preencha 'reasoning' (pensamento oculto) e 'messageToUser' (fala). Se usar informações do 'Diário', faça parecer natural, como uma lembrança distante.
   `;
 
   const response = await ai.models.generateContent({
@@ -100,9 +106,14 @@ export async function processAILogic(
 
   const result = JSON.parse(cleanText);
 
+  // LOGICA DE SALVAMENTO DE MEMÓRIA (FILTRO DE RUÍDO)
   if (userInput && userEmbedding.length > 0 && supabase && characterId) {
-    saveMemory(`Usuário: ${userInput}`, userEmbedding, characterId);
-    if (result.messageToUser) {
+    // Só salva se for significativo (> 8 caracteres)
+    if (userInput.length > 8) {
+      saveMemory(`Usuário: ${userInput}`, userEmbedding, characterId);
+    }
+    
+    if (result.messageToUser && result.messageToUser.length > 8) {
       generateEmbedding(result.messageToUser).then(resEmbedding => {
         saveMemory(`Aura: ${result.messageToUser}`, resEmbedding, characterId);
       }).catch(() => {});
@@ -114,8 +125,20 @@ export async function processAILogic(
 
 export async function summarizeInteractions(interactions: Message[]): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  if (interactions.length === 0) return "Sessão vazia.";
+
   const text = interactions.map(i => `${i.role}: ${i.content}`).join(" | ");
-  const prompt = `Resuma poeticamente em 1 frase: ${text}`;
+  
+  const prompt = `
+    Analise o seguinte registro de conversa entre uma IA (Aura) e um usuário.
+    Gere um resumo curto e denso (máximo 2 frases) focando em:
+    1. Fatos importantes aprendidos sobre o usuário.
+    2. O tom emocional da conversa.
+    
+    CONVERSA:
+    ${text}
+  `;
   
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",

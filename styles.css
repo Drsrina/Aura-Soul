@@ -1,0 +1,74 @@
+
+/* --- Configurações Globais --- */
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+.mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* --- Custom Scrollbar --- */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+.custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #4b5563 transparent;
+}
+
+/* --- Animations --- */
+@keyframes pulse-orb {
+    0%, 100% {
+        transform: scale(var(--orb-scale));
+        opacity: 0.8;
+    }
+    50% {
+        transform: scale(calc(var(--orb-scale) * 1.1));
+        opacity: 1;
+    }
+}
+
+.animate-orb-pulse {
+    animation: pulse-orb var(--pulse-duration, 2s) infinite ease-in-out;
+}
+
+.animate-spin-slow {
+    animation: spin 8s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* --- Glassmorphism Utilities --- */
+.glass-panel {
+    background-color: rgba(17, 24, 39, 0.4);
+    backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-input {
+    background-color: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-input:focus {
+    border-color: rgba(99, 102, 241, 0.5);
+    outline: none;
+}

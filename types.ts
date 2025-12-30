@@ -32,11 +32,10 @@ export interface Session {
   thoughts: Thought[];
 }
 
-export interface MemorySummary {
+export interface SessionSummary {
   id: string;
-  summary: string;
-  interactionCount: number;
-  timestamp: number;
+  content: string;
+  created_at: string;
 }
 
 export interface SystemLog {
@@ -52,6 +51,6 @@ export interface AppState {
   soul: SoulState;
   currentSessionId: string | null;
   sessions: Session[];
-  summaries: MemorySummary[];
+  summaries: string[]; // Strings simples para exibição/contexto
   awakeSince: number | null;
 }
