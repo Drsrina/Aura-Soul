@@ -43,32 +43,37 @@ export interface CharacterDB {
   proactive_call_enabled: boolean;
 }
 
-export async function getRelevantMemories(embedding: number[], characterId: string): Promise<string[]> {
+// NOVA FUNÇÃO MASTER RAG
+export async function searchAuraBrain(embedding: number[], characterId: string): Promise<string[]> {
   if (!supabase || !characterId) return [];
   try {
-    // Busca memórias com match_threshold um pouco mais alto para qualidade
-    // A função match_memories no banco deve idealmente filtrar por importance_score se possível, 
-    // mas aqui filtramos pelo retorno da RPC padrão
-    const { data, error } = await supabase.rpc('match_memories', {
+    const { data, error } = await supabase.rpc('search_aura_brain', {
       query_embedding: embedding,
-      match_threshold: 0.70, 
-      match_count: 5,
+      match_threshold: 0.65, // Threshold levemente menor para pegar associações abstratas
+      match_count: 6, // Pega mais contexto misturado
       character_uuid: characterId
     });
+
     if (error) throw error;
     
-    // Retorna o conteúdo das memórias encontradas
+    // Formata o retorno para indicar a origem da memória
     return (data as any[]).map(m => {
-       // Se o objeto retornado tiver importance_score, poderiamos filtrar aqui também
-       return m.content;
+       const typeLabel = m.source_type === 'dream' ? '[SONHO ANTIGO]' : 
+                         m.source_type === 'thought' ? '[PENSAMENTO]' : 
+                         m.source_type === 'interaction' ? '[CONVERSA]' : '[FATO]';
+       return `${typeLabel}: ${m.content}`;
     });
   } catch (err) {
-    console.error('RAG Error:', err);
+    console.error('Master RAG Error:', err);
     return [];
   }
 }
 
-// Nova assinatura para usar todo o poder da tabela memories
+// Mantemos a antiga para compatibilidade se necessário, mas redirecionamos
+export async function getRelevantMemories(embedding: number[], characterId: string): Promise<string[]> {
+    return searchAuraBrain(embedding, characterId);
+}
+
 export async function saveAdvancedMemory(
   characterId: string, 
   content: string, 
@@ -91,16 +96,20 @@ export async function saveAdvancedMemory(
   }
 }
 
-export async function saveDream(content: string, characterId: string) {
+// Atualizado para receber embedding
+export async function saveDream(content: string, characterId: string, embedding?: number[]) {
   if (!supabase || !characterId) return;
   try {
-    const { error } = await supabase.from('dreams').insert({
+    const payload: any = {
       character_id: characterId,
       content
-    });
+    };
+    if (embedding) payload.embedding = embedding;
+
+    const { error } = await supabase.from('dreams').insert(payload);
     if (error) throw error;
   } catch (err) {
-    throw err; // Propaga o erro para ser capturado pelo addLog
+    throw err; 
   }
 }
 
@@ -122,21 +131,13 @@ export const characterService = {
 
   async toggleAwakeState(characterId: string, isAwake: boolean) {
     if (!supabase) return;
-    
-    // Atualiza o estado do personagem
     const updatePayload: any = { is_awake: isAwake };
-    
-    // Força a atualização do timestamp
     if (isAwake) {
         updatePayload.awakened_at = new Date().toISOString();
     }
     
     const { error } = await supabase.from('characters').update(updatePayload).eq('id', characterId);
-
-    if (error) {
-        console.error("Erro ao atualizar status awake:", error);
-        throw error;
-    }
+    if (error) throw error;
 
     if (isAwake) {
       await supabase.from('wake_periods').insert([{ character_id: characterId }]);
@@ -157,11 +158,12 @@ export const characterService = {
     }
   },
 
-  async saveInteraction(characterId: string, type: 'user_message' | 'ai_response' | 'proactive_call', content: string, soul?: SoulState) {
+  // Atualizado para receber embedding
+  async saveInteraction(characterId: string, type: 'user_message' | 'ai_response' | 'proactive_call', content: string, soul?: SoulState, embedding?: number[]) {
     if (!supabase) return;
     const { data: currentPeriod } = await supabase.from('wake_periods').select('id').eq('character_id', characterId).is('ended_at', null).maybeSingle();
     
-    const { error } = await supabase.from('interactions').insert([{
+    const payload: any = {
       character_id: characterId,
       wake_period_id: currentPeriod?.id,
       type,
@@ -173,14 +175,19 @@ export const characterService = {
         fear: soul.medo,
         confusion: soul.confusão
       } : null
-    }]);
+    };
+    if (embedding) payload.embedding = embedding;
+
+    const { error } = await supabase.from('interactions').insert([payload]);
     if (error) throw error;
   },
 
-  async saveThought(characterId: string, content: string, soul: SoulState) {
+  // Atualizado para receber embedding
+  async saveThought(characterId: string, content: string, soul: SoulState, embedding?: number[]) {
     if (!supabase) return;
     const { data: currentPeriod } = await supabase.from('wake_periods').select('id').eq('character_id', characterId).is('ended_at', null).maybeSingle();
-    const { error } = await supabase.from('thoughts').insert([{
+    
+    const payload: any = {
       character_id: characterId,
       wake_period_id: currentPeriod?.id,
       content,
@@ -191,7 +198,10 @@ export const characterService = {
         fear: soul.medo,
         confusion: soul.confusão
       }
-    }]);
+    };
+    if (embedding) payload.embedding = embedding;
+
+    const { error } = await supabase.from('thoughts').insert([payload]);
     if (error) throw error;
   },
 
@@ -215,7 +225,6 @@ export const characterService = {
   async getRecentContext(characterId: string, limit = 15): Promise<{ history: Message[], soul: SoulState | null, thoughts: string[], dreams: string[] } | null> {
     if (!supabase) return null;
     
-    // Busca interações (chat)
     const { data: interactions, error: iErr } = await supabase
       .from('interactions')
       .select('type, content, created_at')
@@ -223,7 +232,6 @@ export const characterService = {
       .order('created_at', { ascending: false })
       .limit(limit);
 
-    // Busca estado emocional atual
     const { data: emotionalState, error: eErr } = await supabase
       .from('emotional_states')
       .select('*')
@@ -231,7 +239,6 @@ export const characterService = {
       .eq('is_current', true)
       .maybeSingle();
 
-    // Busca os últimos 15 pensamentos
     const { data: thoughts, error: tErr } = await supabase
       .from('thoughts')
       .select('content')
@@ -239,7 +246,6 @@ export const characterService = {
       .order('created_at', { ascending: false })
       .limit(15);
 
-    // Busca os últimos 3 SONHOS (Substitui Summaries)
     const { data: dreams, error: dErr } = await supabase
       .from('dreams')
       .select('content')
@@ -272,9 +278,10 @@ export const characterService = {
   async getStats(characterId: string) {
     if (!supabase) return { wakePeriods: [], emotionalHistory: [], dreams: [] };
 
+    // Aqui usamos 'interactions(count)' que só funciona se houver Foreign Key
     const { data: wakePeriods } = await supabase
       .from('wake_periods')
-      .select('*')
+      .select('*, interactions(count)')
       .eq('character_id', characterId)
       .order('started_at', { ascending: false })
       .limit(5);
@@ -293,8 +300,14 @@ export const characterService = {
       .order('created_at', { ascending: false })
       .limit(10);
 
+    // Mapeamos o retorno para facilitar o uso no front
+    const formattedWakePeriods = wakePeriods?.map((wp: any) => ({
+        ...wp,
+        interactionCount: wp.interactions?.[0]?.count || 0
+    })) || [];
+
     return {
-      wakePeriods: wakePeriods || [],
+      wakePeriods: formattedWakePeriods,
       emotionalHistory: emotionalHistory || [],
       dreams: dreams || []
     };

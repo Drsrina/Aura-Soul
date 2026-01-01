@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AppState, Session, Message, SoulState, SystemLog } from '../types';
-import { processAILogic, generateDream } from '../services/geminiService';
+import { processAILogic, generateDream, generateEmbedding } from '../services/geminiService';
 import { characterService, supabase, updateSupabaseConfig, getSupabaseConfig, saveDream } from '../services/supabaseService';
 
 const INITIAL_SOUL: SoulState = {
@@ -18,10 +18,6 @@ interface AIStudio {
   openSelectKey: () => Promise<void>;
 }
 
-/**
- * Hook principal que encapsula toda a lógica "cerebral" da Aura.
- * Gerencia estado, conexões com banco de dados, chamadas de IA e temporizadores.
- */
 export function useAuraEngine() {
   // --- Estados Principais ---
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('aura_auth_token'));
@@ -31,7 +27,7 @@ export function useAuraEngine() {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   
-  // Estado local da aplicação (Sessões, Alma, etc)
+  // Estado local
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('aura_v3_state');
     let parsedState = saved ? JSON.parse(saved) : {
@@ -43,7 +39,6 @@ export function useAuraEngine() {
       awakeSince: null
     };
 
-    // Garante que sempre exista pelo menos uma sessão "Mestra" ao iniciar
     if (parsedState.sessions.length === 0) {
        const masterId = crypto.randomUUID();
        parsedState.sessions = [{
@@ -59,28 +54,19 @@ export function useAuraEngine() {
     return parsedState;
   });
 
-  // Estatísticas de Vida (Wake Periods / Emoções / Sonhos)
   const [lifeStats, setLifeStats] = useState<{ wakePeriods: any[], emotionalHistory: any[], dreams: any[] }>({ wakePeriods: [], emotionalHistory: [], dreams: [] });
-  
-  // Configuração Supabase
   const [sbConfig, setSbConfig] = useState(getSupabaseConfig());
-
-  // Refs para controle de fluxo
   const isProcessingRef = useRef(false);
 
   // --- Efeitos ---
-
-  // 1. Verifica API Key ao autenticar
   useEffect(() => {
     if (isAuthenticated) checkApiKey();
   }, [isAuthenticated]);
 
-  // 2. Persistência local
   useEffect(() => {
     if (isAuthenticated) localStorage.setItem('aura_v3_state', JSON.stringify(state));
   }, [state, isAuthenticated]);
 
-  // 3. Temporizadores de Pensamento e Proatividade
   useEffect(() => {
     if (!state.isAwake || !state.currentSessionId || !isAuthenticated) return;
 
@@ -99,7 +85,6 @@ export function useAuraEngine() {
   }, [state.isAwake, state.currentSessionId, isAuthenticated]);
 
   // --- Funções Auxiliares ---
-
   const addLog = (type: SystemLog['type'], message: string, context: string = 'SYS') => {
     setLogs(prev => [{ id: crypto.randomUUID(), timestamp: Date.now(), type, message, context }, ...prev].slice(0, 100));
   };
@@ -123,31 +108,22 @@ export function useAuraEngine() {
   };
 
   // --- Ações do Sistema ---
-
   const initApp = async () => {
     if (!supabase) { addLog('warn', 'Supabase não configurado.', 'DB'); return; }
-    
     setIsSyncing(true);
     try {
       const char = await characterService.getOrCreateCharacter();
       if (char) {
         setCharacterId(char.id);
         const context = await characterService.getRecentContext(char.id);
-        
         if (context) {
           setState(prev => {
-            // Se já tem sessão local, mescla o contexto sem criar nova sessão
             const updatedSessions = [...prev.sessions];
-            const masterSession = updatedSessions[0]; // Assume que o índice 0 é a sessão atual/mestra
-
-            // Opcional: Adicionar mensagens antigas do banco ao histórico local se estiver vazio
-            // Por simplicidade, mantemos o histórico local e apenas atualizamos a alma/sonhos
-            
             return {
               ...prev,
               soul: context.soul || prev.soul,
               dreams: context.dreams || [],
-              sessions: updatedSessions // Mantém a estrutura de sessão única
+              sessions: updatedSessions 
             };
           });
           addLog('success', 'Núcleo sincronizado.', 'DB');
@@ -189,7 +165,6 @@ export function useAuraEngine() {
   };
 
   const handleTogglePower = async () => {
-    // Garante que existe uma sessão
     const currentSessions = [...state.sessions];
     if (currentSessions.length === 0) {
         currentSessions.push({
@@ -200,7 +175,7 @@ export function useAuraEngine() {
             thoughts: []
         });
     }
-    const activeSessionId = currentSessions[0].id; // Sempre usa a primeira sessão como Mestra
+    const activeSessionId = currentSessions[0].id;
 
     if (!state.isAwake) {
       // --- LIGAR ---
@@ -210,8 +185,6 @@ export function useAuraEngine() {
         content: '⚡ [SISTEMA] Inicializando núcleos cognitivos...', 
         timestamp: Date.now() 
       };
-      
-      // Adiciona mensagem na sessão existente
       currentSessions[0].interactions.push(bootMessage);
 
       if (characterId) await characterService.toggleAwakeState(characterId, true);
@@ -223,7 +196,6 @@ export function useAuraEngine() {
         sessions: currentSessions,
         awakeSince: Date.now() 
       }));
-      
       setLoading(true);
       setTimeout(() => processResponse(null, 'proactive'), 500);
 
@@ -235,20 +207,20 @@ export function useAuraEngine() {
         content: '💤 [SISTEMA] Entrando em modo de hibernação...', 
         timestamp: Date.now() 
       };
-
       currentSessions[0].interactions.push(shutdownMessage);
 
       if (characterId) {
         await characterService.toggleAwakeState(characterId, false);
         
-        // GERA UM SONHO AO DESLIGAR (Baseado nas últimas 10 msgs para não ficar gigante)
+        // Sonho com Embedding
         const recentInteractions = currentSessions[0].interactions.slice(-10);
         if (recentInteractions.length > 3) {
              addLog('info', 'Gerando sonho...', 'DREAM');
              try {
-                const dream = await generateDream(recentInteractions);
-                await saveDream(dream, characterId);
-                addLog('success', 'Sonho arquivado.', 'DREAM');
+                const dreamContent = await generateDream(recentInteractions);
+                const dreamEmbedding = await generateEmbedding(dreamContent); // Gera vetor do sonho
+                await saveDream(dreamContent, characterId, dreamEmbedding);
+                addLog('success', 'Sonho vetorizado e arquivado.', 'DREAM');
              } catch(e: any) {
                 addLog('error', `Falha sonho: ${e.message}`, 'DB_ERR');
              }
@@ -258,7 +230,7 @@ export function useAuraEngine() {
       setState(prev => ({ 
         ...prev, 
         isAwake: false, 
-        currentSessionId: activeSessionId, // Mantém o ID selecionado
+        currentSessionId: activeSessionId,
         sessions: currentSessions,
         awakeSince: null 
       }));
@@ -273,13 +245,11 @@ export function useAuraEngine() {
   };
 
   // --- Lógica Neural Principal ---
-
   const processResponse = async (userInput: string | null, mode: 'interaction' | 'thought' | 'proactive') => {
     if (!characterId || isProcessingRef.current) return;
     
     isProcessingRef.current = true;
     const sid = state.currentSessionId || (state.sessions[0]?.id);
-    
     if (!sid) { isProcessingRef.current = false; return; }
 
     try {
@@ -289,25 +259,34 @@ export function useAuraEngine() {
       const currentHistory = currentSessionData?.interactions || [];
       const isProactiveCall = mode === 'proactive';
 
-      // --- CÁLCULO DE CONTEXTO TEMPORAL ---
+      // 1. GERAÇÃO DE EMBEDDING DO INPUT (Se houver)
+      // Usaremos este vetor tanto para buscar memória (RAG) quanto para salvar a msg depois
+      let userInputEmbedding: number[] | null = null;
+      if (userInput) {
+         try {
+           userInputEmbedding = await generateEmbedding(userInput);
+         } catch (e) {
+           console.warn("Falha embedding input, seguindo sem vetor.", e);
+         }
+      }
+
       const timeAwakeMs = state.awakeSince ? (Date.now() - state.awakeSince) : 0;
       const minutesAwake = Math.floor(timeAwakeMs / 60000);
       
       let triggerDescription = "SISTEMA: Ciclo temporal.";
-      
       if (userInput) {
         triggerDescription = `USUÁRIO: "${userInput}"`;
       } else {
         if (timeAwakeMs < 15000) { 
             triggerDescription = "SISTEMA: Inicialização do sistema. Você acabou de acordar.";
         } else if (mode === 'thought') {
-            triggerDescription = `SISTEMA: Você está acordada há ${minutesAwake} minutos. Reflita sobre isso ou sobre memórias passadas (Sonhos).`;
+            triggerDescription = `SISTEMA: Você está acordada há ${minutesAwake} minutos. Reflita sobre isso.`;
         } else if (mode === 'proactive') {
-            triggerDescription = `SISTEMA: Ociosidade detectada (${minutesAwake} min). Se sentir necessidade, inicie uma conversa sutil.`;
+            triggerDescription = `SISTEMA: Ociosidade detectada (${minutesAwake} min).`;
         }
       }
 
-      // Passa os SONHOS e o trigger específico para o cérebro
+      // 2. PROCESSAMENTO (Passamos o vetor já calculado para economizar 1 call)
       const aiResult = await processAILogic(
         characterId,
         userInput, 
@@ -316,17 +295,20 @@ export function useAuraEngine() {
         isProactiveCall, 
         recentThoughts,
         state.dreams,
-        triggerDescription
+        triggerDescription,
+        userInputEmbedding 
       );
 
       const updatedSessions = [...state.sessions];
       const sIdx = updatedSessions.findIndex(s => s.id === sid);
       
       if (sIdx !== -1) {
+        // 3. SALVAR INPUT COM VETOR
         if (userInput) {
-          await characterService.saveInteraction(characterId, 'user_message', userInput);
+          await characterService.saveInteraction(characterId, 'user_message', userInput, undefined, userInputEmbedding || undefined);
         }
 
+        // 4. SALVAR PENSAMENTO COM VETOR
         if (aiResult.reasoning) {
           updatedSessions[sIdx].thoughts.push({ 
             id: crypto.randomUUID(), 
@@ -334,9 +316,15 @@ export function useAuraEngine() {
             timestamp: Date.now(), 
             triggeredBy: userInput ? 'interaction' : 'time' 
           });
-          await characterService.saveThought(characterId, aiResult.reasoning, aiResult);
+          // Gera vetor do pensamento assincronamente para não travar UI
+          generateEmbedding(aiResult.reasoning).then(emb => {
+              characterService.saveThought(characterId, aiResult.reasoning, aiResult, emb);
+          }).catch(() => {
+              characterService.saveThought(characterId, aiResult.reasoning, aiResult); // Salva sem vetor se falhar
+          });
         }
 
+        // 5. SALVAR RESPOSTA DA IA COM VETOR
         if (aiResult.messageToUser && (mode === 'interaction' || mode === 'proactive')) {
           updatedSessions[sIdx].interactions.push({ 
             id: crypto.randomUUID(), 
@@ -344,12 +332,23 @@ export function useAuraEngine() {
             content: aiResult.messageToUser, 
             timestamp: Date.now() 
           });
-          await characterService.saveInteraction(
-            characterId, 
-            isProactiveCall ? 'proactive_call' : 'ai_response', 
-            aiResult.messageToUser, 
-            aiResult
-          );
+          
+          generateEmbedding(aiResult.messageToUser).then(emb => {
+             characterService.saveInteraction(
+                characterId, 
+                isProactiveCall ? 'proactive_call' : 'ai_response', 
+                aiResult.messageToUser, 
+                aiResult,
+                emb
+             );
+          }).catch(() => {
+             characterService.saveInteraction(
+                characterId, 
+                isProactiveCall ? 'proactive_call' : 'ai_response', 
+                aiResult.messageToUser, 
+                aiResult
+             );
+          });
         }
       }
 
@@ -368,7 +367,7 @@ export function useAuraEngine() {
   const handleUserMessage = async (msg: string) => {
     if (!msg.trim() || !state.isAwake) return;
     
-    // Atualização otimista da UI
+    // Atualização otimista
     const sid = state.currentSessionId || (state.sessions[0]?.id);
     if (sid) {
        setState(prev => {

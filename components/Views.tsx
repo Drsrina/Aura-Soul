@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect } from 'react';
-import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity, Cloud } from 'lucide-react';
+import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity, Cloud, MessageCircle } from 'lucide-react';
 import { SoulOrb, SoulStatus, EmotionCard } from './Visuals';
 import { Session, AppState, SystemLog } from '../types';
 
@@ -203,7 +203,13 @@ export const SoulView: React.FC<SoulViewProps> = ({ soul, lifeStats }) => {
                       <span className="text-[10px] font-bold text-gray-400">INÍCIO</span>
                       <span className="text-xs font-mono text-green-400">{new Date(wp.started_at).toLocaleString()}</span>
                   </div>
-                  <div className="h-8 w-px bg-white/10 mx-4" />
+                  
+                  {/* VISUALIZAÇÃO DA CONTAGEM DE MENSAGENS */}
+                  <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/5">
+                      <MessageCircle size={10} className="text-gray-500" />
+                      <span className="text-[10px] font-mono text-gray-300">{wp.interactionCount || 0} msgs</span>
+                  </div>
+
                   <div className="flex flex-col text-right">
                       <span className="text-[10px] font-bold text-gray-400">FIM</span>
                       <span className="text-xs font-mono text-red-400">{wp.ended_at ? new Date(wp.ended_at).toLocaleString() : 'ATIVO AGORA'}</span>

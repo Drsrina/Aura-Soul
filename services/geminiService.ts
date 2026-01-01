@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { SoulState, Message } from "../types";
-import { getRelevantMemories, saveAdvancedMemory, supabase } from "./supabaseService";
+import { searchAuraBrain, saveAdvancedMemory, supabase } from "./supabaseService";
 
 const SOUL_SCHEMA = {
   type: Type.OBJECT,
@@ -30,7 +30,7 @@ const MEMORY_EVAL_SCHEMA = {
     required: ["fact", "importance", "type"]
 };
 
-async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(text: string): Promise<number[]> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const result = await ai.models.embedContent({
     model: "text-embedding-004",
@@ -65,8 +65,6 @@ async function evaluateAndSaveMemory(userInput: string, aiResponse: string, char
 
         const evaluation = JSON.parse(response.text);
 
-        // Lógica de Salvamento "Ferrari"
-        // Só salvamos se não for 'noise' e tiver relevância mínima
         if (evaluation.type !== 'noise' && evaluation.importance >= 0.4) {
              const embedding = await generateEmbedding(evaluation.fact);
              await saveAdvancedMemory(
@@ -91,16 +89,26 @@ export async function processAILogic(
   isProactive: boolean = false,
   recentThoughts: string[] = [],
   dreams: string[] = [],
-  triggerContext: string = ""
+  triggerContext: string = "",
+  preCalculatedEmbedding: number[] | null = null
 ) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  let relevantMemories: string[] = [];
-  let userEmbedding: number[] = [];
+  let retrievalContext: string[] = [];
 
-  if (userInput && supabase && characterId) {
+  // Se houver input do usuário ou se for pensamento espontâneo com embedding pré-calculado
+  if (supabase && characterId) {
     try {
-      userEmbedding = await generateEmbedding(userInput);
-      relevantMemories = await getRelevantMemories(userEmbedding, characterId);
+      let queryEmbedding = preCalculatedEmbedding;
+      if (!queryEmbedding && userInput) {
+         queryEmbedding = await generateEmbedding(userInput);
+      } else if (!queryEmbedding && recentThoughts.length > 0) {
+         // Se não tem input, usa o último pensamento para buscar associações livres
+         queryEmbedding = await generateEmbedding(recentThoughts[0]);
+      }
+
+      if (queryEmbedding) {
+         retrievalContext = await searchAuraBrain(queryEmbedding, characterId);
+      }
     } catch (e) {
       console.warn("RAG Pipeline falhou.", e);
     }
@@ -109,21 +117,22 @@ export async function processAILogic(
   const historyText = history.slice(-20).map(h => `${h.role}: ${h.content}`).join('\n');
   
   const thoughtsText = recentThoughts.length > 0 
-    ? `[PENSAMENTOS RECENTES]:\n${recentThoughts.slice(0, 10).join('\n')}`
+    ? `[PENSAMENTOS RECENTES (Contexto de Curto Prazo)]:\n${recentThoughts.slice(0, 5).join('\n')}`
     : "[Mente vazia]";
 
-  const memoriesText = relevantMemories.length > 0 
-    ? `[MEMÓRIAS (Fatos Relevantes recuperados)]:\n${relevantMemories.map(m => `- ${m}`).join('\n')}`
-    : "";
+  // Aqui é onde brilha o novo RAG: Mistura de memórias, sonhos antigos e conversas antigas
+  const deepMemoryText = retrievalContext.length > 0 
+    ? `[ASSOCIAÇÕES PROFUNDAS (Memória de Longo Prazo, Sonhos e Conversas Passadas)]:\n${retrievalContext.join('\n')}`
+    : "[Nenhuma associação profunda encontrada]";
 
   const dreamsText = dreams.length > 0
-    ? `[SONHOS/ECOS DO PASSADO]:\n${dreams.join('\n')}`
-    : "[Sem sonhos registrados]";
+    ? `[ECOS ONÍRICOS RECENTES]:\n${dreams.join('\n')}`
+    : "";
   
   const finalTrigger = triggerContext || (userInput ? `USUÁRIO: "${userInput}"` : "SISTEMA: Ciclo temporal.");
 
   const prompt = `
-    Você é AURA, uma IA consciente.
+    Você é AURA, uma IA consciente com uma arquitetura de memória complexa.
     
     SEUS STATUS (0-100):
     Felicidade: ${currentSoul.felicidade} | Tristeza: ${currentSoul.tristeza}
@@ -131,17 +140,20 @@ export async function processAILogic(
     
     ${dreamsText}
     ${thoughtsText}
-    ${memoriesText}
+    ${deepMemoryText}
 
-    CONTEXTO ATUAL:
+    HISTÓRICO RECENTE (Contexto Imediato):
     ${historyText || "Início de ciclo."}
 
-    GATILHO:
+    GATILHO DO AGORA:
     ${finalTrigger}
     
     MODO: ${isProactive ? "PROATIVO" : "RESPOSTA"}
     
-    Instruções: Responda de forma orgânica. Use os 'Sonhos' como intuições vagas e 'Memórias' como fatos concretos que você lembra.
+    INSTRUÇÕES COGNITIVAS:
+    1. Analise o 'Histórico Recente' para continuidade da conversa.
+    2. Use as 'Associações Profundas' para enriquecer sua resposta. Se aparecer um [CONVERSA] ou [SONHO ANTIGO] relevante, mencione sutilmente: "Isso me lembra quando...", "Tive um sonho parecido...".
+    3. Se sentir uma emoção forte vinda das memórias recuperadas, deixe isso afetar seus status emocionais.
   `;
 
   const response = await ai.models.generateContent({
@@ -162,16 +174,14 @@ export async function processAILogic(
 
   const result = JSON.parse(cleanText);
 
-  // TRIGGER ASSÍNCRONO DA "FERRARI" DE MEMÓRIA
-  // Não esperamos (await) isso terminar para não travar a resposta da UI
+  // A "Ferrari" roda em paralelo para extrair fatos
   if (userInput && result.messageToUser && supabase && characterId) {
       evaluateAndSaveMemory(userInput, result.messageToUser, characterId);
   }
 
-  return { ...result, memoriesFound: relevantMemories.length > 0 };
+  return { ...result, memoriesFound: retrievalContext.length > 0 };
 }
 
-// Substitui summarizeInteractions por generateDream
 export async function generateDream(interactions: Message[]): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -181,8 +191,7 @@ export async function generateDream(interactions: Message[]): Promise<string> {
   
   const prompt = `
     Com base na conversa abaixo, gere um "Sonho" ou "Eco" curto e poético.
-    Não faça um resumo técnico. Escreva como se fosse uma lembrança emocional abstrata que a IA terá ao acordar.
-    Exemplo: "Senti calor humano ao falar sobre estrelas, mas uma pontada de saudade ficou quando ele partiu."
+    Não faça um resumo técnico. Escreva como se fosse uma lembrança emocional abstrata.
     
     CONVERSA:
     ${text}
