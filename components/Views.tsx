@@ -19,7 +19,7 @@ export const InteractionsView: React.FC<InteractionsViewProps> = ({
   state, displayedSessionId, loading, input, setInput, onSendMessage, onSelectSession
 }) => {
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const displayedSession = state.sessions.find(s => s.id === displayedSessionId);
+  const displayedSession = state.sessions.find(s => s.id === displayedSessionId) || state.sessions[0];
 
   // Auto-scroll chat
   useEffect(() => {
@@ -30,37 +30,41 @@ export const InteractionsView: React.FC<InteractionsViewProps> = ({
     <div className="flex-1 p-4 md:p-6 h-full overflow-hidden bg-gray-950">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full max-w-[1600px] mx-auto">
         
-        {/* --- CAMPO 1: MEMÓRIA TEMPORAL (Esquerda - 3 cols) --- */}
-        <div className="lg:col-span-3 glass-panel rounded-3xl flex flex-col overflow-hidden border border-white/5 bg-gray-900/40">
-          <div className="p-4 border-b border-white/5 flex items-center gap-2 bg-white/5">
-            <History size={14} className="text-gray-400" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Linha do Tempo</span>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-            {state.sessions.map(s => (
-              <button 
-                key={s.id} 
-                onClick={() => onSelectSession(s.id)} 
-                className={`w-full text-left p-3 rounded-xl border transition-all group ${displayedSessionId === s.id ? 'bg-indigo-500/20 border-indigo-500/40' : 'border-transparent hover:bg-white/5'}`}
-              >
-                <div className="flex justify-between items-center mb-1">
-                  <span className={`text-[10px] font-bold ${displayedSessionId === s.id ? 'text-indigo-200' : 'text-gray-400 group-hover:text-gray-200'}`}>
-                    {s.date}
-                  </span>
-                  {s.id === state.currentSessionId && (
-                    <span className="flex h-2 w-2 relative">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                    </span>
-                  )}
+        {/* --- CAMPO 1: MEMÓRIA TEMPORAL + ORBE (Esquerda - 3 cols) --- */}
+        <div className="lg:col-span-3 flex flex-col gap-6 h-full overflow-hidden">
+            
+            {/* Timeline (Agora visual apenas) */}
+            <div className="flex-1 glass-panel rounded-3xl flex flex-col overflow-hidden border border-white/5 bg-gray-900/40 min-h-0">
+                <div className="p-4 border-b border-white/5 flex items-center gap-2 bg-white/5 shrink-0">
+                    <History size={14} className="text-gray-400" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Ciclos de Vida</span>
                 </div>
-                <div className="text-[9px] mono opacity-50 text-gray-500 truncate">
-                   ID: {s.id.slice(0,8)}...
+                
+                <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                    {/* Lista simplificada para mostrar que é um único fluxo */}
+                    <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-[10px] font-bold text-indigo-200">Sessão Atual</span>
+                            <span className="flex h-2 w-2 relative">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                        </div>
+                        <div className="text-[9px] mono opacity-50 text-gray-400">
+                             Fluxo contínuo
+                        </div>
+                    </div>
                 </div>
-              </button>
-            ))}
-          </div>
+            </div>
+
+            {/* ORBE NO CANTO INFERIOR ESQUERDO */}
+            <div className="h-64 glass-panel rounded-3xl border border-white/5 bg-gray-900/40 relative overflow-hidden shrink-0">
+                 <div className="absolute top-4 left-4 z-20 bg-black/20 backdrop-blur-md px-3 py-1 rounded-full border border-white/5">
+                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Núcleo</span>
+                 </div>
+                 <SoulOrb soul={state.soul} isAwake={state.isAwake} />
+            </div>
+
         </div>
 
         {/* --- CAMPO 2: NÚCLEO DA AURA (Centro - 6 cols) --- */}
@@ -71,7 +75,7 @@ export const InteractionsView: React.FC<InteractionsViewProps> = ({
              <SoulStatus soul={state.soul} />
           </div>
 
-          {/* Main Stage (Chat Only - Sphere Removed) */}
+          {/* Main Stage (Chat) */}
           <div className="flex-1 glass-panel rounded-[2.5rem] border border-indigo-500/20 relative overflow-hidden flex flex-col bg-gray-900/60 shadow-2xl">
             
             {/* Chat Area */}
@@ -85,14 +89,16 @@ export const InteractionsView: React.FC<InteractionsViewProps> = ({
                   <div className={`max-w-[85%] px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-lg backdrop-blur-md ${
                     msg.role === 'user' 
                       ? 'bg-indigo-600 text-white rounded-tr-sm' 
-                      : 'bg-gray-800/80 border border-white/10 text-gray-200 rounded-tl-sm'
+                      : msg.content.includes('[SISTEMA]') 
+                        ? 'bg-transparent border border-white/10 text-gray-500 text-xs font-mono w-full text-center py-2'
+                        : 'bg-gray-800/80 border border-white/10 text-gray-200 rounded-tl-sm'
                   }`}>
                     {msg.content}
                   </div>
                 </div>
               ))}
               
-              {loading && displayedSessionId === state.currentSessionId && (
+              {loading && (
                 <div className="flex justify-start animate-pulse">
                   <div className="bg-gray-800/50 px-4 py-2 rounded-2xl rounded-tl-sm border border-white/5 text-[10px] text-indigo-400 font-mono flex items-center gap-2">
                     <Sparkles size={10} /> Pensando...
@@ -114,13 +120,12 @@ export const InteractionsView: React.FC<InteractionsViewProps> = ({
                       type="text" 
                       value={input} 
                       onChange={(e) => setInput(e.target.value)} 
-                      placeholder={displayedSessionId !== state.currentSessionId ? "Volte ao presente para falar..." : "Converse com Aura..."}
-                      disabled={displayedSessionId !== state.currentSessionId}
+                      placeholder="Converse com Aura..."
                       className="w-full bg-black/40 border border-white/10 rounded-full pl-12 pr-24 py-4 text-sm text-white focus:border-indigo-500/50 focus:outline-none focus:bg-black/60 transition-all placeholder:text-gray-600"
                    />
                    <button 
                       type="submit" 
-                      disabled={loading || displayedSessionId !== state.currentSessionId}
+                      disabled={loading}
                       className="absolute right-2 top-2 bottom-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                    >
                       Enviar

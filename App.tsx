@@ -46,7 +46,7 @@ const App: React.FC = () => {
       <nav className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-gray-900/60 backdrop-blur-2xl z-50 shrink-0">
         <div className="flex items-center gap-4">
           <Zap size={20} className={engine.state.isAwake ? 'text-indigo-400' : 'text-gray-600'} />
-          <h1 className="text-xs font-black tracking-widest uppercase text-indigo-400">Aura v2.2</h1>
+          <h1 className="text-xs font-black tracking-widest uppercase text-indigo-400">Aura v3.0</h1>
         </div>
         <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10">
           <button onClick={() => setCurrentPage('interactions')} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'interactions' ? 'bg-indigo-600' : 'text-gray-500'}`}>DIÁLOGO</button>

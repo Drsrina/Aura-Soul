@@ -14,7 +14,7 @@ export const LoginPage: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
     setError('');
 
     setTimeout(() => {
-      if (username === 'adminultra' && password === 'aura8000') {
+      if (username === 'adm' && password === 'adm') {
         localStorage.setItem('aura_auth_token', 'session_active_' + Date.now());
         onLogin();
       } else {

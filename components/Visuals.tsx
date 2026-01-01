@@ -26,10 +26,10 @@ export const SoulOrb: React.FC<SoulOrbProps> = ({ soul, isAwake }) => {
   } as React.CSSProperties;
 
   return (
-    <div className="relative flex items-center justify-center w-64 h-64 mx-auto my-4">
+    <div className="relative flex items-center justify-center w-full h-full min-h-[200px]">
       <div 
         style={orbStyle} 
-        className={`absolute w-48 h-48 rounded-full transition-all duration-1000 ease-in-out z-10 ${isAwake ? 'animate-orb-pulse' : ''}`} 
+        className={`absolute w-32 h-32 md:w-48 md:h-48 rounded-full transition-all duration-1000 ease-in-out z-10 ${isAwake ? 'animate-orb-pulse' : ''}`} 
       />
       {isAwake && (
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">

@@ -6,10 +6,10 @@ import { characterService, supabase, updateSupabaseConfig, getSupabaseConfig, sa
 
 const INITIAL_SOUL: SoulState = {
   felicidade: 50,
-  tristeza: 10,
-  solidão: 20,
-  medo: 5,
-  confusão: 15,
+  tristeza: 8,
+  solidão: 15,
+  medo: 3,
+  confusão: 13,
   perguntas: ["O que eu sou quando você não olha?", "O silêncio é uma forma de morte?"]
 };
 
@@ -34,7 +34,7 @@ export function useAuraEngine() {
   // Estado local da aplicação (Sessões, Alma, etc)
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('aura_v3_state');
-    return saved ? JSON.parse(saved) : {
+    let parsedState = saved ? JSON.parse(saved) : {
       isAwake: false,
       soul: INITIAL_SOUL,
       currentSessionId: null,
@@ -42,6 +42,21 @@ export function useAuraEngine() {
       dreams: [],
       awakeSince: null
     };
+
+    // Garante que sempre exista pelo menos uma sessão "Mestra" ao iniciar
+    if (parsedState.sessions.length === 0) {
+       const masterId = crypto.randomUUID();
+       parsedState.sessions = [{
+         id: masterId,
+         date: new Date().toLocaleDateString(),
+         startTime: Date.now(),
+         interactions: [],
+         thoughts: []
+       }];
+       parsedState.currentSessionId = masterId;
+    }
+
+    return parsedState;
   });
 
   // Estatísticas de Vida (Wake Periods / Emoções / Sonhos)
@@ -121,31 +136,18 @@ export function useAuraEngine() {
         
         if (context) {
           setState(prev => {
-            // CORREÇÃO: Se já estiver acordada (sessão ativa), NÃO cria sessão de histórico (cloudSession)
-            // Isso evita que o chat pule para um histórico duplicado enquanto o usuário interage na sessão atual.
-            if (prev.isAwake && prev.currentSessionId) {
-                return {
-                    ...prev,
-                    soul: context.soul || prev.soul,
-                    dreams: context.dreams || []
-                    // Mantém sessions inalterado para não quebrar o chat ativo
-                };
-            }
+            // Se já tem sessão local, mescla o contexto sem criar nova sessão
+            const updatedSessions = [...prev.sessions];
+            const masterSession = updatedSessions[0]; // Assume que o índice 0 é a sessão atual/mestra
 
-            // Comportamento padrão (apenas se estiver iniciando/dormindo)
-            const cloudSession: Session | null = context.history.length > 0 ? {
-              id: 'cloud-' + Date.now(),
-              date: 'Sincronizado',
-              startTime: Date.now(),
-              interactions: context.history,
-              thoughts: context.thoughts.map(t => ({ id: crypto.randomUUID(), content: t, timestamp: Date.now(), triggeredBy: 'time' }))
-            } : null;
-
+            // Opcional: Adicionar mensagens antigas do banco ao histórico local se estiver vazio
+            // Por simplicidade, mantemos o histórico local e apenas atualizamos a alma/sonhos
+            
             return {
               ...prev,
               soul: context.soul || prev.soul,
-              sessions: cloudSession ? [cloudSession, ...prev.sessions] : prev.sessions,
-              dreams: context.dreams || []
+              dreams: context.dreams || [],
+              sessions: updatedSessions // Mantém a estrutura de sessão única
             };
           });
           addLog('success', 'Núcleo sincronizado.', 'DB');
@@ -187,51 +189,79 @@ export function useAuraEngine() {
   };
 
   const handleTogglePower = async () => {
+    // Garante que existe uma sessão
+    const currentSessions = [...state.sessions];
+    if (currentSessions.length === 0) {
+        currentSessions.push({
+            id: crypto.randomUUID(),
+            date: new Date().toLocaleDateString(),
+            startTime: Date.now(),
+            interactions: [],
+            thoughts: []
+        });
+    }
+    const activeSessionId = currentSessions[0].id; // Sempre usa a primeira sessão como Mestra
+
     if (!state.isAwake) {
-      // Ligar
-      const newSid = crypto.randomUUID();
-      const bootMessage: Message = { id: crypto.randomUUID(), role: 'ai', content: '⚡ [SISTEMA] Inicializando núcleos cognitivos...', timestamp: Date.now() };
-      
-      const newSession: Session = {
-        id: newSid,
-        date: new Date().toLocaleDateString(),
-        startTime: Date.now(),
-        interactions: [bootMessage],
-        thoughts: []
+      // --- LIGAR ---
+      const bootMessage: Message = { 
+        id: crypto.randomUUID(), 
+        role: 'ai', 
+        content: '⚡ [SISTEMA] Inicializando núcleos cognitivos...', 
+        timestamp: Date.now() 
       };
       
+      // Adiciona mensagem na sessão existente
+      currentSessions[0].interactions.push(bootMessage);
+
       if (characterId) await characterService.toggleAwakeState(characterId, true);
       
       setState(prev => ({
         ...prev,
         isAwake: true,
-        currentSessionId: newSid,
-        sessions: [newSession, ...prev.sessions],
+        currentSessionId: activeSessionId,
+        sessions: currentSessions,
         awakeSince: Date.now() 
       }));
       
       setLoading(true);
       setTimeout(() => processResponse(null, 'proactive'), 500);
+
     } else {
-      // Desligar
+      // --- DESLIGAR ---
+      const shutdownMessage: Message = { 
+        id: crypto.randomUUID(), 
+        role: 'ai', 
+        content: '💤 [SISTEMA] Entrando em modo de hibernação...', 
+        timestamp: Date.now() 
+      };
+
+      currentSessions[0].interactions.push(shutdownMessage);
+
       if (characterId) {
         await characterService.toggleAwakeState(characterId, false);
         
-        // GERA UM SONHO AO DESLIGAR
-        const currentSession = state.sessions.find(s => s.id === state.currentSessionId);
-        if (currentSession && currentSession.interactions.length > 3) {
-             addLog('info', 'Gerando sonho da sessão...', 'DREAM');
+        // GERA UM SONHO AO DESLIGAR (Baseado nas últimas 10 msgs para não ficar gigante)
+        const recentInteractions = currentSessions[0].interactions.slice(-10);
+        if (recentInteractions.length > 3) {
+             addLog('info', 'Gerando sonho...', 'DREAM');
              try {
-                const dream = await generateDream(currentSession.interactions);
+                const dream = await generateDream(recentInteractions);
                 await saveDream(dream, characterId);
                 addLog('success', 'Sonho arquivado.', 'DREAM');
              } catch(e: any) {
-                // CORREÇÃO: Usando addLog para erros críticos de banco aparecerem no painel System
-                addLog('error', `Falha ao salvar sonho: ${e.message}`, 'DB_ERR');
+                addLog('error', `Falha sonho: ${e.message}`, 'DB_ERR');
              }
         }
       }
-      setState(prev => ({ ...prev, isAwake: false, currentSessionId: null, awakeSince: null }));
+      
+      setState(prev => ({ 
+        ...prev, 
+        isAwake: false, 
+        currentSessionId: activeSessionId, // Mantém o ID selecionado
+        sessions: currentSessions,
+        awakeSince: null 
+      }));
     }
   };
 
