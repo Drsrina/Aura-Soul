@@ -3,10 +3,10 @@ import React, { useState } from 'react';
 import { Zap } from 'lucide-react';
 import { useAuraEngine } from './hooks/useAuraEngine';
 import { LoginPage, ApiKeyBlocker } from './components/Auth';
-import { InteractionsView, SoulView, SystemView } from './components/Views';
+import { InteractionsView, SoulView, SystemView, EngramView } from './components/Views';
 
 const App: React.FC = () => {
-  const [currentPage, setCurrentPage] = useState<'interactions' | 'soul' | 'system'>('interactions');
+  const [currentPage, setCurrentPage] = useState<'interactions' | 'soul' | 'engram' | 'system'>('interactions');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
 
@@ -33,7 +33,8 @@ const App: React.FC = () => {
 
   // Renderização Condicional de Auth
   if (!engine.isAuthenticated) {
-    return <LoginPage onLogin={() => engine.setIsAuthenticated(true)} />;
+    // Passa o handler de login que aceita username
+    return <LoginPage onLogin={engine.setIsAuthenticated} />;
   }
 
   if (engine.hasKey === false) {
@@ -51,6 +52,7 @@ const App: React.FC = () => {
         <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10">
           <button onClick={() => setCurrentPage('interactions')} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'interactions' ? 'bg-indigo-600' : 'text-gray-500'}`}>DIÁLOGO</button>
           <button onClick={() => { setCurrentPage('soul'); engine.fetchStats(); }} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'soul' ? 'bg-indigo-600' : 'text-gray-500'}`}>ESSÊNCIA</button>
+          <button onClick={() => { setCurrentPage('engram'); engine.fetchEngram(); }} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'engram' ? 'bg-indigo-600' : 'text-gray-500'}`}>ENGRAMA</button>
           <button onClick={() => setCurrentPage('system')} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'system' ? 'bg-indigo-600' : 'text-gray-500'}`}>SISTEMA</button>
         </div>
         <button onClick={engine.handleTogglePower} className={`px-6 py-2 rounded-xl border-2 font-black text-[10px] tracking-widest ${engine.state.isAwake ? 'border-red-500 text-red-500' : 'border-green-500 text-green-500'}`}>
@@ -74,6 +76,10 @@ const App: React.FC = () => {
 
         {currentPage === 'soul' && (
           <SoulView soul={engine.state.soul} lifeStats={engine.lifeStats} />
+        )}
+
+        {currentPage === 'engram' && (
+          <EngramView nodes={engine.engramNodes} />
         )}
 
         {currentPage === 'system' && (

@@ -46,6 +46,19 @@ export interface SystemLog {
   context?: string;
 }
 
+export interface EngramNode {
+  id: string;
+  group_type: 'memory' | 'dream' | 'thought' | 'interaction';
+  content: string;
+  embedding: number[]; // Vetor de 768 dimensões
+  created_at: string;
+  // Propriedades visuais calculadas no frontend
+  x?: number;
+  y?: number;
+  z?: number;
+  connections?: string[]; // IDs de nós conectados
+}
+
 export interface AppState {
   isAwake: boolean;
   soul: SoulState;

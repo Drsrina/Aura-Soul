@@ -1,8 +1,8 @@
 
 import React, { useRef, useEffect } from 'react';
-import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity, Cloud, MessageCircle } from 'lucide-react';
-import { SoulOrb, SoulStatus, EmotionCard } from './Visuals';
-import { Session, AppState, SystemLog } from '../types';
+import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity, Cloud, MessageCircle, Share2 } from 'lucide-react';
+import { SoulOrb, SoulStatus, EmotionCard, EngramGalaxy } from './Visuals';
+import { Session, AppState, SystemLog, EngramNode } from '../types';
 
 // --- View: Interactions (Main Tamagotchi Dashboard) ---
 interface InteractionsViewProps {
@@ -260,6 +260,28 @@ export const SoulView: React.FC<SoulViewProps> = ({ soul, lifeStats }) => {
         </div>
 
       </div>
+    </div>
+  );
+};
+
+// --- View: Engram (3D Visualization) ---
+interface EngramViewProps {
+  nodes: EngramNode[];
+}
+
+export const EngramView: React.FC<EngramViewProps> = ({ nodes }) => {
+  return (
+    <div className="flex-1 h-full overflow-hidden bg-gray-950 flex flex-col">
+       <div className="h-16 px-8 flex items-center border-b border-white/5 bg-gray-900/40 backdrop-blur">
+          <Share2 size={16} className="text-indigo-400 mr-3" />
+          <div>
+            <h2 className="text-xs font-black uppercase tracking-widest text-indigo-400">Engrama Vetorial</h2>
+            <p className="text-[10px] text-gray-500">Visualização de Similaridade Cognitiva (RAG)</p>
+          </div>
+       </div>
+       <div className="flex-1 p-6">
+          <EngramGalaxy nodes={nodes} />
+       </div>
     </div>
   );
 };

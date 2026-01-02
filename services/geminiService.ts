@@ -30,18 +30,50 @@ const MEMORY_EVAL_SCHEMA = {
     required: ["fact", "importance", "type"]
 };
 
+// Função auxiliar para pausa
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Wrapper robusto para chamadas de API com Retry (Backoff Exponencial)
+async function callGeminiWithRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    if (retries > 0 && (error?.status === 429 || error?.code === 429 || error?.message?.includes('429'))) {
+      console.warn(`[API BUSY] 429 Detectado. Retrying em ${delay}ms... Restam ${retries} tentativas.`);
+      await sleep(delay);
+      return callGeminiWithRetry(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
+
 export async function generateEmbedding(text: string): Promise<number[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const result = await ai.models.embedContent({
-    model: "text-embedding-004",
-    contents: { parts: [{ text }] },
-  });
-  return result.embeddings[0].values;
+  // Se falhar o embedding (tarefa secundária), não crasha o app, retorna vetor vazio ou erro controlado
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    return await callGeminiWithRetry(async () => {
+      const result = await ai.models.embedContent({
+        model: "text-embedding-004",
+        contents: { parts: [{ text }] },
+      });
+      return result.embeddings[0].values;
+    }, 2, 2000); // 2 retries, começando com 2s de delay
+
+  } catch (e) {
+    console.warn("Falha silenciosa no Embedding (429 ou Network):", e);
+    // Retorna array vazio ou lança erro dependendo da criticidade. 
+    // Para embeddings, é melhor falhar e salvar sem vetor do que travar o chat.
+    throw e; 
+  }
 }
 
 // Nova função para avaliar e salvar memórias estruturadas
 async function evaluateAndSaveMemory(userInput: string, aiResponse: string, characterId: string) {
     if (!userInput || userInput.length < 5) return;
+
+    // Delay artificial para evitar concorrência com a geração de resposta principal
+    await sleep(2000); 
 
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const prompt = `
@@ -54,30 +86,38 @@ async function evaluateAndSaveMemory(userInput: string, aiResponse: string, char
     `;
 
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: MEMORY_EVAL_SCHEMA
-            }
-        });
+        // Usa retry aqui também
+        const response = await callGeminiWithRetry(async () => {
+            return await ai.models.generateContent({
+                model: "gemini-3-flash-preview",
+                contents: prompt,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: MEMORY_EVAL_SCHEMA
+                }
+            });
+        }, 1, 3000); // Apenas 1 retry, não é crítico
 
         const evaluation = JSON.parse(response.text);
 
         if (evaluation.type !== 'noise' && evaluation.importance >= 0.4) {
-             const embedding = await generateEmbedding(evaluation.fact);
-             await saveAdvancedMemory(
-                 characterId, 
-                 evaluation.fact, 
-                 embedding, 
-                 evaluation.type === 'core' ? 'core' : 'recent', 
-                 evaluation.importance
-             );
-             console.log(`[MEMORY SAVED] Type: ${evaluation.type} | Score: ${evaluation.importance} | Fact: ${evaluation.fact}`);
+             // Gera embedding da memória
+             try {
+                const embedding = await generateEmbedding(evaluation.fact);
+                await saveAdvancedMemory(
+                    characterId, 
+                    evaluation.fact, 
+                    embedding, 
+                    evaluation.type === 'core' ? 'core' : 'recent', 
+                    evaluation.importance
+                );
+                console.log(`[MEMORY SAVED] Type: ${evaluation.type} | Score: ${evaluation.importance} | Fact: ${evaluation.fact}`);
+             } catch (embErr) {
+                 console.warn("Memória salva sem vetor devido a erro de API.");
+             }
         }
     } catch (e) {
-        console.warn("Falha na avaliação de memória:", e);
+        console.warn("Falha na avaliação de memória (Ignorado para fluidez):", e);
     }
 }
 
@@ -99,20 +139,30 @@ export async function processAILogic(
   if (supabase && characterId) {
     try {
       let queryEmbedding = preCalculatedEmbedding;
-      if (!queryEmbedding && userInput) {
-         queryEmbedding = await generateEmbedding(userInput);
-      } else if (!queryEmbedding && recentThoughts.length > 0) {
-         // Se não tem input, usa o último pensamento para buscar associações livres
-         queryEmbedding = await generateEmbedding(recentThoughts[0]);
+      
+      // Tenta gerar embedding se não veio pré-calculado
+      if (!queryEmbedding) {
+          try {
+            if (userInput) {
+                queryEmbedding = await generateEmbedding(userInput);
+            } else if (recentThoughts.length > 0) {
+                queryEmbedding = await generateEmbedding(recentThoughts[0]);
+            }
+          } catch (e) {
+              console.warn("RAG pulado: Falha no embedding do input.");
+          }
       }
 
       if (queryEmbedding) {
          retrievalContext = await searchAuraBrain(queryEmbedding, characterId);
       }
     } catch (e) {
-      console.warn("RAG Pipeline falhou.", e);
+      console.warn("RAG Pipeline falhou (Ignorado).", e);
     }
   }
+
+  // Pequeno delay se houver muito contexto para dar tempo ao buffer da API
+  if (retrievalContext.length > 0) await sleep(200);
 
   const historyText = history.slice(-20).map(h => `${h.role}: ${h.content}`).join('\n');
   
@@ -120,7 +170,6 @@ export async function processAILogic(
     ? `[PENSAMENTOS RECENTES (Contexto de Curto Prazo)]:\n${recentThoughts.slice(0, 5).join('\n')}`
     : "[Mente vazia]";
 
-  // Aqui é onde brilha o novo RAG: Mistura de memórias, sonhos antigos e conversas antigas
   const deepMemoryText = retrievalContext.length > 0 
     ? `[ASSOCIAÇÕES PROFUNDAS (Memória de Longo Prazo, Sonhos e Conversas Passadas)]:\n${retrievalContext.join('\n')}`
     : "[Nenhuma associação profunda encontrada]";
@@ -156,14 +205,18 @@ export async function processAILogic(
     3. Se sentir uma emoção forte vinda das memórias recuperadas, deixe isso afetar seus status emocionais.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: SOUL_SCHEMA
-    }
-  });
+  // CHAMADA PRINCIPAL - ESSA PRECISA FUNCIONAR
+  // Aumentamos retries e delay
+  const response = await callGeminiWithRetry(async () => {
+    return await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+        responseMimeType: "application/json",
+        responseSchema: SOUL_SCHEMA
+        }
+    });
+  }, 3, 2000);
 
   let cleanText = response.text.trim();
   if (cleanText.startsWith("```json")) {
@@ -174,9 +227,9 @@ export async function processAILogic(
 
   const result = JSON.parse(cleanText);
 
-  // A "Ferrari" roda em paralelo para extrair fatos
+  // Processamento de memória em segundo plano (sem await para não bloquear UI, mas a função interna tem delays)
   if (userInput && result.messageToUser && supabase && characterId) {
-      evaluateAndSaveMemory(userInput, result.messageToUser, characterId);
+      evaluateAndSaveMemory(userInput, result.messageToUser, characterId).catch(console.error);
   }
 
   return { ...result, memoriesFound: retrievalContext.length > 0 };
@@ -197,10 +250,13 @@ export async function generateDream(interactions: Message[]): Promise<string> {
     ${text}
   `;
   
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt
-  });
+  // Sonhos são baixa prioridade, 1 retry apenas
+  const response = await callGeminiWithRetry(async () => {
+    return await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt
+    });
+  }, 1, 5000);
 
   return response.text || "Ecos distantes.";
 }

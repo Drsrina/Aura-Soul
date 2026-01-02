@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { User, Lock, ShieldCheck, AlertTriangle, Loader2, Zap } from 'lucide-react';
 
-export const LoginPage: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
+export const LoginPage: React.FC<{ onLogin: (username: string) => void }> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -14,11 +14,16 @@ export const LoginPage: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
     setError('');
 
     setTimeout(() => {
-      if (username === 'adm' && password === 'adm') {
+      // Lógica de Autenticação Multi-User Simples
+      const isValidAdmin = username === 'adm' && password === 'adm';
+      const isValidUser = username === 'user' && password === 'user';
+
+      if (isValidAdmin || isValidUser) {
         localStorage.setItem('aura_auth_token', 'session_active_' + Date.now());
-        onLogin();
+        localStorage.setItem('aura_current_user', username); // Persiste quem logou
+        onLogin(username);
       } else {
-        setError('Acesso Negado: Assinatura Neural Inválida.');
+        setError('Acesso Negado: Credenciais inválidas.');
         setIsAccessing(false);
       }
     }, 800);
@@ -43,7 +48,7 @@ export const LoginPage: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
         <div className="space-y-4">
           <div className="relative group">
             <User className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors" size={16} />
-            <input required type="text" placeholder="IDENTIDADE" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full glass-input rounded-2xl pl-12 pr-6 py-4 text-xs font-bold tracking-widest text-white placeholder:text-gray-700 transition-all uppercase" />
+            <input required type="text" placeholder="IDENTIDADE (adm / user)" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full glass-input rounded-2xl pl-12 pr-6 py-4 text-xs font-bold tracking-widest text-white placeholder:text-gray-700 transition-all uppercase" />
           </div>
           <div className="relative group">
             <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors" size={16} />

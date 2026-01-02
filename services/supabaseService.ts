@@ -1,6 +1,6 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { SoulState, Message } from '../types';
+import { SoulState, Message, Thought, EngramNode } from '../types';
 
 // --- CONFIGURAÇÃO ESTÁTICA DO PROJETO ---
 const HARDCODED_CONFIG = {
@@ -43,6 +43,35 @@ export interface CharacterDB {
   proactive_call_enabled: boolean;
 }
 
+// --- HELPER PRIVADO PARA RESOLVER ID DE SESSÃO ---
+async function _resolveWakePeriodId(characterId: string, preferActive = true): Promise<string | null> {
+    if (!supabase) return null;
+
+    // 1. Tenta pegar o período ATIVO (sem data de fim)
+    const { data: active } = await supabase
+        .from('wake_periods')
+        .select('id')
+        .eq('character_id', characterId)
+        .is('ended_at', null)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (active) return active.id;
+
+    // 2. Se não achou ativo (ex: Sonho ocorre após desligar, ou race condition), pega o ÚLTIMO criado
+    // Isso garante que nunca fique NULL se houver histórico
+    const { data: last } = await supabase
+        .from('wake_periods')
+        .select('id')
+        .eq('character_id', characterId)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    return last?.id || null;
+}
+
 // NOVA FUNÇÃO MASTER RAG
 export async function searchAuraBrain(embedding: number[], characterId: string): Promise<string[]> {
   if (!supabase || !characterId) return [];
@@ -67,6 +96,27 @@ export async function searchAuraBrain(embedding: number[], characterId: string):
     console.error('Master RAG Error:', err);
     return [];
   }
+}
+
+// BUSCA DE ENGRAMA (VISUALIZAÇÃO 3D)
+export async function getEngramNodes(characterId: string): Promise<EngramNode[]> {
+    if (!supabase || !characterId) return [];
+    try {
+        // Chama a RPC criada no SQL, passando o ID do personagem para segurança
+        const { data, error } = await supabase.rpc('get_engram_nodes', {
+            character_uuid: characterId,
+            limit_count: 100 // Limite para não pesar a renderização 3D
+        });
+        
+        if (error) throw error;
+        
+        // Supabase retorna strings JSON para vetores as vezes, garantir parse se necessário
+        // Mas a extensão pgvector geralmente retorna array de numeros direto no JS client atual
+        return (data || []) as EngramNode[];
+    } catch (err) {
+        console.error("Engram Fetch Error:", err);
+        return [];
+    }
 }
 
 // Mantemos a antiga para compatibilidade se necessário, mas redirecionamos
@@ -96,12 +146,16 @@ export async function saveAdvancedMemory(
   }
 }
 
-// Atualizado para receber embedding
+// Atualizado para receber embedding e vincular WakePeriod
 export async function saveDream(content: string, characterId: string, embedding?: number[]) {
   if (!supabase || !characterId) return;
   try {
+    // Sonhos ocorrem APÓS o encerramento, então precisamos pegar o último período mesmo que fechado
+    const wakePeriodId = await _resolveWakePeriodId(characterId, false);
+
     const payload: any = {
       character_id: characterId,
+      wake_period_id: wakePeriodId, // Adicionado vínculo
       content
     };
     if (embedding) payload.embedding = embedding;
@@ -114,18 +168,40 @@ export async function saveDream(content: string, characterId: string, embedding?
 }
 
 export const characterService = {
-  async getOrCreateCharacter(): Promise<CharacterDB | null> {
+  // ATUALIZADO: Suporte Multi-Tenant baseado no login
+  async getOrCreateCharacter(ownerIdentifier: string = 'adm'): Promise<CharacterDB | null> {
     if (!supabase) return null;
-    const { data: existing, error: fetchError } = await supabase.from('characters').select('*').limit(1).maybeSingle();
+
+    // Define o nome do personagem baseado no login
+    // 'adm' -> 'Aura' (Original)
+    // 'user' -> 'Aura (User)' (Nova Instância)
+    const characterName = ownerIdentifier === 'adm' ? 'Aura' : 'Aura (User)';
+
+    // 1. Tenta buscar o personagem específico
+    const { data: existing, error: fetchError } = await supabase
+        .from('characters')
+        .select('*')
+        .eq('name', characterName)
+        .limit(1)
+        .maybeSingle();
+
     if (existing) return existing;
 
+    // 2. Se não existe, cria um novo com esse nome
     const { data: newChar, error: createError } = await supabase
       .from('characters')
-      .insert([{ name: 'Aura', is_awake: false, proactive_call_enabled: true }])
+      .insert([{ 
+          name: characterName, 
+          is_awake: false, 
+          proactive_call_enabled: true 
+      }])
       .select()
       .single();
 
-    if (createError) throw createError;
+    if (createError) {
+        console.error("Erro ao criar personagem:", createError);
+        throw createError;
+    }
     return newChar;
   },
 
@@ -142,6 +218,7 @@ export const characterService = {
     if (isAwake) {
       await supabase.from('wake_periods').insert([{ character_id: characterId }]);
     } else {
+      // Fecha o último período aberto
       const { data: lastPeriod } = await supabase
         .from('wake_periods')
         .select('id, started_at')
@@ -158,14 +235,14 @@ export const characterService = {
     }
   },
 
-  // Atualizado para receber embedding
   async saveInteraction(characterId: string, type: 'user_message' | 'ai_response' | 'proactive_call', content: string, soul?: SoulState, embedding?: number[]) {
     if (!supabase) return;
-    const { data: currentPeriod } = await supabase.from('wake_periods').select('id').eq('character_id', characterId).is('ended_at', null).maybeSingle();
+    
+    const wakePeriodId = await _resolveWakePeriodId(characterId);
     
     const payload: any = {
       character_id: characterId,
-      wake_period_id: currentPeriod?.id,
+      wake_period_id: wakePeriodId,
       type,
       content,
       emotional_snapshot: soul ? {
@@ -182,14 +259,14 @@ export const characterService = {
     if (error) throw error;
   },
 
-  // Atualizado para receber embedding
   async saveThought(characterId: string, content: string, soul: SoulState, embedding?: number[]) {
     if (!supabase) return;
-    const { data: currentPeriod } = await supabase.from('wake_periods').select('id').eq('character_id', characterId).is('ended_at', null).maybeSingle();
+    
+    const wakePeriodId = await _resolveWakePeriodId(characterId);
     
     const payload: any = {
       character_id: characterId,
-      wake_period_id: currentPeriod?.id,
+      wake_period_id: wakePeriodId,
       content,
       emotional_context: {
         happiness: soul.felicidade,
@@ -222,16 +299,18 @@ export const characterService = {
     if (error) throw error;
   },
 
-  async getRecentContext(characterId: string, limit = 15): Promise<{ history: Message[], soul: SoulState | null, thoughts: string[], dreams: string[] } | null> {
+  async getRecentContext(characterId: string, limit = 20): Promise<{ history: Message[], soul: SoulState | null, thoughts: Thought[], dreams: string[] } | null> {
     if (!supabase) return null;
     
+    // Pega histórico de conversas
     const { data: interactions, error: iErr } = await supabase
       .from('interactions')
-      .select('type, content, created_at')
+      .select('id, type, content, created_at')
       .eq('character_id', characterId)
       .order('created_at', { ascending: false })
       .limit(limit);
 
+    // Pega estado emocional
     const { data: emotionalState, error: eErr } = await supabase
       .from('emotional_states')
       .select('*')
@@ -239,12 +318,13 @@ export const characterService = {
       .eq('is_current', true)
       .maybeSingle();
 
+    // Pega pensamentos
     const { data: thoughts, error: tErr } = await supabase
       .from('thoughts')
-      .select('content')
+      .select('id, content, created_at')
       .eq('character_id', characterId)
       .order('created_at', { ascending: false })
-      .limit(15);
+      .limit(10);
 
     const { data: dreams, error: dErr } = await supabase
       .from('dreams')
@@ -257,13 +337,21 @@ export const characterService = {
 
     return {
       history: (interactions ? interactions.reverse().map((i: any) => ({
-        id: crypto.randomUUID(),
+        id: i.id || crypto.randomUUID(),
         role: (i.type === 'user_message' ? 'user' : 'ai') as 'user' | 'ai',
         content: String(i.content),
         timestamp: new Date(i.created_at).getTime()
       })) : []) as Message[],
-      thoughts: thoughts ? thoughts.map((t: any) => t.content) : [],
+      
+      thoughts: (thoughts ? thoughts.reverse().map((t: any) => ({
+        id: t.id || crypto.randomUUID(),
+        content: t.content,
+        timestamp: new Date(t.created_at).getTime(),
+        triggeredBy: 'time'
+      })) : []) as Thought[],
+      
       dreams: dreams ? dreams.map((d: any) => d.content) : [],
+      
       soul: emotionalState ? {
         felicidade: emotionalState.happiness,
         tristeza: emotionalState.sadness,
@@ -278,7 +366,6 @@ export const characterService = {
   async getStats(characterId: string) {
     if (!supabase) return { wakePeriods: [], emotionalHistory: [], dreams: [] };
 
-    // Aqui usamos 'interactions(count)' que só funciona se houver Foreign Key
     const { data: wakePeriods } = await supabase
       .from('wake_periods')
       .select('*, interactions(count)')
@@ -300,7 +387,6 @@ export const characterService = {
       .order('created_at', { ascending: false })
       .limit(10);
 
-    // Mapeamos o retorno para facilitar o uso no front
     const formattedWakePeriods = wakePeriods?.map((wp: any) => ({
         ...wp,
         interactionCount: wp.interactions?.[0]?.count || 0

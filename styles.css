@@ -35,16 +35,23 @@ body {
 @keyframes pulse-orb {
     0%, 100% {
         transform: scale(var(--orb-scale));
-        opacity: 0.8;
     }
     50% {
-        transform: scale(calc(var(--orb-scale) * 1.1));
-        opacity: 1;
+        transform: scale(calc(var(--orb-scale) * 1.05));
     }
 }
 
 .animate-orb-pulse {
     animation: pulse-orb var(--pulse-duration, 2s) infinite ease-in-out;
+}
+
+@keyframes liquid-shimmer {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.animate-liquid-shimmer {
+    animation: liquid-shimmer 8s linear infinite;
 }
 
 .animate-spin-slow {

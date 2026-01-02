@@ -1,8 +1,8 @@
 
 import { useState, useEffect, useRef } from 'react';
-import { AppState, Session, Message, SoulState, SystemLog } from '../types';
+import { AppState, Session, Message, SoulState, SystemLog, EngramNode } from '../types';
 import { processAILogic, generateDream, generateEmbedding } from '../services/geminiService';
-import { characterService, supabase, updateSupabaseConfig, getSupabaseConfig, saveDream } from '../services/supabaseService';
+import { characterService, supabase, updateSupabaseConfig, getSupabaseConfig, saveDream, getEngramNodes } from '../services/supabaseService';
 
 const INITIAL_SOUL: SoulState = {
   felicidade: 50,
@@ -21,15 +21,22 @@ interface AIStudio {
 export function useAuraEngine() {
   // --- Estados Principais ---
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('aura_auth_token'));
+  // Estado para saber QUEM está logado (adm ou user)
+  const [currentUser, setCurrentUser] = useState<string>(() => localStorage.getItem('aura_current_user') || 'adm');
+  
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   
+  // Estado Engrama (Nova Feature)
+  const [engramNodes, setEngramNodes] = useState<EngramNode[]>([]);
+
   // Estado local
   const [state, setState] = useState<AppState>(() => {
-    const saved = localStorage.getItem('aura_v3_state');
+    // Agora o cache local é único por usuário para evitar mistura visual antes do sync
+    const saved = localStorage.getItem(`aura_v3_state_${localStorage.getItem('aura_current_user') || 'adm'}`);
     let parsedState = saved ? JSON.parse(saved) : {
       isAwake: false,
       soul: INITIAL_SOUL,
@@ -64,19 +71,23 @@ export function useAuraEngine() {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (isAuthenticated) localStorage.setItem('aura_v3_state', JSON.stringify(state));
-  }, [state, isAuthenticated]);
+    // Salva o estado usando chave específica do usuário
+    if (isAuthenticated) localStorage.setItem(`aura_v3_state_${currentUser}`, JSON.stringify(state));
+  }, [state, isAuthenticated, currentUser]);
 
   useEffect(() => {
     if (!state.isAwake || !state.currentSessionId || !isAuthenticated) return;
 
+    // AUMENTO DE INTERVALOS PARA EVITAR ERRO 429 E CUSTOS
+    // Pensamento autônomo: de 30s para 5 minutos (300.000ms)
     const thoughtTimer = setInterval(() => {
       if (!isProcessingRef.current) processResponse(null, 'thought');
-    }, 30000);
+    }, 300000);
 
+    // Proatividade: de 70s para 10 minutos (600.000ms)
     const proactiveTimer = setInterval(() => {
       if (!isProcessingRef.current) processResponse(null, 'proactive');
-    }, 70000);
+    }, 600000);
 
     return () => {
       clearInterval(thoughtTimer);
@@ -112,13 +123,24 @@ export function useAuraEngine() {
     if (!supabase) { addLog('warn', 'Supabase não configurado.', 'DB'); return; }
     setIsSyncing(true);
     try {
-      const char = await characterService.getOrCreateCharacter();
+      // Passa o currentUser para carregar o personagem correto
+      const char = await characterService.getOrCreateCharacter(currentUser);
       if (char) {
         setCharacterId(char.id);
         const context = await characterService.getRecentContext(char.id);
+        
         if (context) {
           setState(prev => {
             const updatedSessions = [...prev.sessions];
+            
+            // ATUALIZAÇÃO: Injeta o histórico recuperado na sessão principal
+            // Garante que o usuário veja as mensagens antigas ao abrir o app
+            if (updatedSessions.length > 0) {
+               // Substitui o histórico local pelo do banco para garantir consistência
+               updatedSessions[0].interactions = context.history;
+               updatedSessions[0].thoughts = context.thoughts;
+            }
+
             return {
               ...prev,
               soul: context.soul || prev.soul,
@@ -126,7 +148,7 @@ export function useAuraEngine() {
               sessions: updatedSessions 
             };
           });
-          addLog('success', 'Núcleo sincronizado.', 'DB');
+          addLog('success', `Aura carregada. Perfil: ${char.name}`, 'DB');
         }
       }
     } catch (e: any) {
@@ -136,14 +158,21 @@ export function useAuraEngine() {
     }
   };
 
+  const handleLogin = (username: string) => {
+    setCurrentUser(username);
+    setIsAuthenticated(true);
+  };
+
   const handleOpenKeySelector = async () => {
     const aiStudio = (window as any).aistudio as AIStudio | undefined;
     if (aiStudio && typeof aiStudio.openSelectKey === 'function') {
       await aiStudio.openSelectKey();
-      setHasKey(true);
-      initApp();
+      // Não assumimos sucesso imediato, recarregamos a verificação
+      const selected = await aiStudio.hasSelectedApiKey();
+      setHasKey(selected);
+      if(selected) initApp();
     } else {
-      alert("Seletor indisponível.");
+      alert("Seletor de Chave API indisponível neste ambiente.");
     }
   };
 
@@ -163,6 +192,13 @@ export function useAuraEngine() {
       setLifeStats(stats);
     }
   };
+
+  const fetchEngram = async () => {
+      if (characterId) {
+          const nodes = await getEngramNodes(characterId);
+          setEngramNodes(nodes);
+      }
+  }
 
   const handleTogglePower = async () => {
     const currentSessions = [...state.sessions];
@@ -218,11 +254,11 @@ export function useAuraEngine() {
              addLog('info', 'Gerando sonho...', 'DREAM');
              try {
                 const dreamContent = await generateDream(recentInteractions);
-                const dreamEmbedding = await generateEmbedding(dreamContent); // Gera vetor do sonho
+                const dreamEmbedding = await generateEmbedding(dreamContent).catch(() => undefined); // Safe
                 await saveDream(dreamContent, characterId, dreamEmbedding);
                 addLog('success', 'Sonho vetorizado e arquivado.', 'DREAM');
              } catch(e: any) {
-                addLog('error', `Falha sonho: ${e.message}`, 'DB_ERR');
+                addLog('warn', `Sonho salvo parcialmente: ${e.message}`, 'DREAM_WARN');
              }
         }
       }
@@ -240,7 +276,10 @@ export function useAuraEngine() {
   const handleLogout = () => {
     if (confirm("Deseja encerrar a sessão neural?")) {
       localStorage.removeItem('aura_auth_token');
+      localStorage.removeItem('aura_current_user');
       setIsAuthenticated(false);
+      setCurrentUser('adm'); // Reset para default
+      setCharacterId(null);
     }
   };
 
@@ -253,8 +292,11 @@ export function useAuraEngine() {
     if (!sid) { isProcessingRef.current = false; return; }
 
     try {
-      const context = await characterService.getRecentContext(characterId);
-      const recentThoughts = context?.thoughts || [];
+      // Nota: Passamos o limite 20 para ter mais contexto para a IA, mas a UI já estará populada
+      const context = await characterService.getRecentContext(characterId, 20);
+      
+      // Mapeia thoughts de objeto para string apenas para o contexto do prompt
+      const recentThoughts = context?.thoughts.map(t => t.content) || [];
       const currentSessionData = state.sessions.find(s => s.id === sid);
       const currentHistory = currentSessionData?.interactions || [];
       const isProactiveCall = mode === 'proactive';
@@ -264,9 +306,10 @@ export function useAuraEngine() {
       let userInputEmbedding: number[] | null = null;
       if (userInput) {
          try {
+           // Retry já implementado no serviço, mas fazemos catch final aqui
            userInputEmbedding = await generateEmbedding(userInput);
          } catch (e) {
-           console.warn("Falha embedding input, seguindo sem vetor.", e);
+           console.warn("Falha embedding input (seguindo sem RAG):", e);
          }
       }
 
@@ -305,6 +348,7 @@ export function useAuraEngine() {
       if (sIdx !== -1) {
         // 3. SALVAR INPUT COM VETOR
         if (userInput) {
+          // Aqui não precisamos esperar o embedding se já calculamos ou falhou antes
           await characterService.saveInteraction(characterId, 'user_message', userInput, undefined, userInputEmbedding || undefined);
         }
 
@@ -316,11 +360,13 @@ export function useAuraEngine() {
             timestamp: Date.now(), 
             triggeredBy: userInput ? 'interaction' : 'time' 
           });
-          // Gera vetor do pensamento assincronamente para não travar UI
+          
+          // Gera vetor do pensamento assincronamente (FIRE AND FORGET SAFE)
           generateEmbedding(aiResult.reasoning).then(emb => {
               characterService.saveThought(characterId, aiResult.reasoning, aiResult, emb);
           }).catch(() => {
-              characterService.saveThought(characterId, aiResult.reasoning, aiResult); // Salva sem vetor se falhar
+              // Se falhar o embedding, salva sem ele
+              characterService.saveThought(characterId, aiResult.reasoning, aiResult); 
           });
         }
 
@@ -333,6 +379,7 @@ export function useAuraEngine() {
             timestamp: Date.now() 
           });
           
+          // Gera vetor da resposta (FIRE AND FORGET SAFE)
           generateEmbedding(aiResult.messageToUser).then(emb => {
              characterService.saveInteraction(
                 characterId, 
@@ -393,7 +440,7 @@ export function useAuraEngine() {
     state,
     setState,
     isAuthenticated,
-    setIsAuthenticated,
+    setIsAuthenticated: handleLogin, // Exposta como handleLogin para uso no LoginPage
     hasKey,
     handleOpenKeySelector,
     handleLogout,
@@ -401,6 +448,8 @@ export function useAuraEngine() {
     handleUserMessage,
     handleUpdateConfig,
     fetchStats,
+    fetchEngram,
+    engramNodes,
     lifeStats,
     logs,
     loading,
