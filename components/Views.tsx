@@ -1,6 +1,6 @@
 
-import React, { useRef, useEffect } from 'react';
-import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity, Cloud, MessageCircle, Share2 } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Power, Heart, BrainCircuit, Database, Terminal, ShieldAlert, LogOut, History, MessageSquare, Sparkles, Activity, Cloud, MessageCircle, Share2, Search, X, Filter, ChevronRight, Loader2, Play } from 'lucide-react';
 import { SoulOrb, SoulStatus, EmotionCard, EngramGalaxy } from './Visuals';
 import { Session, AppState, SystemLog, EngramNode } from '../types';
 
@@ -267,24 +267,173 @@ export const SoulView: React.FC<SoulViewProps> = ({ soul, lifeStats }) => {
 // --- View: Engram (3D Visualization) ---
 interface EngramViewProps {
   nodes: EngramNode[];
+  onSearch: (q: string) => Promise<void>;
+  searching: boolean;
+  onLoadEngram: () => void;
+  isLoading: boolean;
 }
 
-export const EngramView: React.FC<EngramViewProps> = ({ nodes }) => {
-  return (
-    <div className="flex-1 h-full overflow-hidden bg-gray-950 flex flex-col">
-       <div className="h-16 px-8 flex items-center border-b border-white/5 bg-gray-900/40 backdrop-blur">
-          <Share2 size={16} className="text-indigo-400 mr-3" />
-          <div>
-            <h2 className="text-xs font-black uppercase tracking-widest text-indigo-400">Engrama Vetorial</h2>
-            <p className="text-[10px] text-gray-500">Visualização de Similaridade Cognitiva (RAG)</p>
+export const EngramView: React.FC<EngramViewProps> = ({ nodes, onSearch, searching, onLoadEngram, isLoading }) => {
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedNode, setSelectedNode] = useState<EngramNode | null>(null);
+    const [activeFilters, setActiveFilters] = useState<string[]>([]);
+    const [hasLoaded, setHasLoaded] = useState(false);
+
+    // Se já tiver nodes carregados, considera como carregado
+    useEffect(() => {
+        if(nodes.length > 0) setHasLoaded(true);
+    }, [nodes]);
+    
+    const handleSearchSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSearch(searchQuery);
+    };
+
+    const toggleFilter = (type: string) => {
+        setActiveFilters(prev => 
+            prev.includes(type) ? prev.filter(f => f !== type) : [...prev, type]
+        );
+    };
+
+    const handleInitialLoad = () => {
+        onLoadEngram();
+        setHasLoaded(true);
+    }
+
+    // --- TELA DE "CARREGAR ENGRAMA" (Segurança de performance) ---
+    if (!hasLoaded && nodes.length === 0 && !isLoading) {
+        return (
+            <div className="flex-1 h-full flex items-center justify-center bg-gray-950">
+                <div className="max-w-md w-full p-8 border border-white/10 bg-gray-900/50 rounded-3xl text-center space-y-6 backdrop-blur-xl">
+                    <div className="w-20 h-20 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto text-indigo-400 border border-indigo-500/20 animate-pulse">
+                        <Share2 size={32} />
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-black uppercase tracking-wider text-white">Visualização de Engrama</h2>
+                        <p className="text-xs text-gray-500 mt-2 font-mono">Renderização vetorial 3D de alta densidade.</p>
+                    </div>
+                    <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-200 text-xs font-bold flex items-center gap-3">
+                        <ShieldAlert size={16} />
+                        <span className="uppercase tracking-wide">Cuidado: Sistema pode ficar lento</span>
+                    </div>
+                    <button 
+                        onClick={handleInitialLoad}
+                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 group"
+                    >
+                        <Play size={14} className="group-hover:translate-x-1 transition-transform" /> Carregar Engrama
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    if (isLoading && nodes.length === 0) {
+        return (
+             <div className="flex-1 h-full flex items-center justify-center bg-gray-950">
+                <div className="flex flex-col items-center gap-4 text-indigo-400">
+                    <Loader2 size={40} className="animate-spin" />
+                    <span className="text-xs font-black uppercase tracking-widest animate-pulse">Carregando Vetores Neurais...</span>
+                </div>
+             </div>
+        )
+    }
+
+    return (
+    <div className="flex-1 h-full overflow-hidden bg-gray-950 flex flex-col relative animate-in fade-in duration-700">
+       {/* HEADS UP DISPLAY (HUD) */}
+       <div className="absolute top-0 left-0 right-0 z-20 p-6 pointer-events-none">
+          <div className="flex justify-between items-start">
+             
+             {/* Titulo */}
+             <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 pointer-events-auto">
+                <Share2 size={16} className="text-indigo-400" />
+                <div>
+                    <h2 className="text-xs font-black uppercase tracking-widest text-indigo-400">Engrama Vetorial</h2>
+                    <p className="text-[10px] text-gray-500">Navegue: Arraste para girar, Scroll para Zoom</p>
+                </div>
+             </div>
+
+             {/* Barra de Busca */}
+             <form onSubmit={handleSearchSubmit} className="flex gap-2 pointer-events-auto w-96">
+                <div className="relative flex-1 group">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400" size={14} />
+                    <input 
+                        type="text" 
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        placeholder="Buscar conceito semântico (ex: 'Medo')..."
+                        className="w-full glass-input rounded-xl pl-10 pr-4 py-3 text-xs text-white placeholder:text-gray-600 focus:border-indigo-500 transition-all"
+                    />
+                </div>
+                <button type="submit" disabled={searching} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl transition-colors disabled:opacity-50">
+                    {searching ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
+                </button>
+             </form>
+          </div>
+
+          {/* Filtros */}
+          <div className="mt-4 flex gap-2 pointer-events-auto">
+             <FilterButton label="Memórias" color="bg-indigo-500" onClick={() => toggleFilter('memory')} active={!activeFilters.includes('memory') && activeFilters.length > 0} />
+             <FilterButton label="Sonhos" color="bg-fuchsia-500" onClick={() => toggleFilter('dream')} active={!activeFilters.includes('dream') && activeFilters.length > 0} />
+             <FilterButton label="Pensamentos" color="bg-amber-500" onClick={() => toggleFilter('thought')} active={!activeFilters.includes('thought') && activeFilters.length > 0} />
+             <FilterButton label="Conversas" color="bg-emerald-500" onClick={() => toggleFilter('interaction')} active={!activeFilters.includes('interaction') && activeFilters.length > 0} />
           </div>
        </div>
-       <div className="flex-1 p-6">
-          <EngramGalaxy nodes={nodes} />
+
+       {/* 3D CANVAS LAYER */}
+       <div className="flex-1">
+          <EngramGalaxy nodes={nodes} onNodeSelect={setSelectedNode} filters={activeFilters.length > 0 ? [] : []} /> 
        </div>
+
+       {/* DETAIL PANEL (SLIDE OVER) */}
+       {selectedNode && (
+           <div className="absolute top-20 bottom-20 right-6 w-80 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl z-30 animate-in slide-in-from-right-10 flex flex-col">
+               <div className="flex justify-between items-start mb-4">
+                    <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest ${
+                        selectedNode.group_type === 'memory' ? 'bg-indigo-500/20 text-indigo-300' :
+                        selectedNode.group_type === 'dream' ? 'bg-fuchsia-500/20 text-fuchsia-300' :
+                        selectedNode.group_type === 'thought' ? 'bg-amber-500/20 text-amber-300' :
+                        'bg-emerald-500/20 text-emerald-300'
+                    }`}>
+                        {selectedNode.group_type}
+                    </div>
+                    <button onClick={() => setSelectedNode(null)} className="text-gray-500 hover:text-white transition-colors">
+                        <X size={16} />
+                    </button>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto custom-scrollbar">
+                   <p className="text-sm leading-relaxed text-gray-200 font-serif italic">"{selectedNode.content}"</p>
+               </div>
+
+               <div className="pt-4 border-t border-white/10 mt-4 space-y-2">
+                   <div className="flex justify-between text-[10px] text-gray-500 mono">
+                       <span>ID:</span>
+                       <span className="truncate w-24">{selectedNode.id}</span>
+                   </div>
+                   <div className="flex justify-between text-[10px] text-gray-500 mono">
+                       <span>DATA:</span>
+                       <span>{new Date(selectedNode.created_at).toLocaleDateString()}</span>
+                   </div>
+                   {typeof selectedNode.relevance === 'number' && (
+                       <div className="mt-2 bg-indigo-500/10 rounded-lg p-2 flex items-center justify-between">
+                           <span className="text-[9px] font-bold text-indigo-300 uppercase">Relevância Semântica</span>
+                           <span className="text-xs font-bold text-white">{(selectedNode.relevance * 100).toFixed(0)}%</span>
+                       </div>
+                   )}
+               </div>
+           </div>
+       )}
     </div>
   );
 };
+
+const FilterButton = ({ label, color, onClick, active }: any) => (
+    <button onClick={onClick} className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide transition-all ${active ? 'bg-white/5 border-white/10 text-gray-500 line-through opacity-50' : 'bg-black/40 border-white/20 text-gray-200 hover:border-white/40'}`}>
+        <span className={`inline-block w-2 h-2 rounded-full mr-2 ${color}`}></span>
+        {label}
+    </button>
+);
 
 // --- View: System (Config & Logs) ---
 interface SystemViewProps {

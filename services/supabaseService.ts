@@ -44,10 +44,24 @@ export interface CharacterDB {
 }
 
 // --- HELPER PRIVADO PARA RESOLVER ID DE SESSÃO ---
-async function _resolveWakePeriodId(characterId: string, preferActive = true): Promise<string | null> {
+// Context: 'interaction' (busca ativo, fallback ultimo) | 'dream' (busca estritamente o ultimo criado, pois acabou de fechar)
+async function _resolveWakePeriodId(characterId: string, context: 'interaction' | 'dream' = 'interaction'): Promise<string | null> {
     if (!supabase) return null;
 
-    // 1. Tenta pegar o período ATIVO (sem data de fim)
+    // Se for SONHO, queremos o último período criado, independente de estar aberto ou fechado.
+    // Isso é crucial porque sonhos são gerados APÓS o toggleAwakeState(false), ou seja, o período já fechou.
+    if (context === 'dream') {
+         const { data: last } = await supabase
+            .from('wake_periods')
+            .select('id')
+            .eq('character_id', characterId)
+            .order('started_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        return last?.id || null;
+    }
+
+    // Se for INTERAÇÃO, priorizamos o que está ATIVO (ended_at is null)
     const { data: active } = await supabase
         .from('wake_periods')
         .select('id')
@@ -59,8 +73,7 @@ async function _resolveWakePeriodId(characterId: string, preferActive = true): P
 
     if (active) return active.id;
 
-    // 2. Se não achou ativo (ex: Sonho ocorre após desligar, ou race condition), pega o ÚLTIMO criado
-    // Isso garante que nunca fique NULL se houver histórico
+    // Fallback: Se não achou ativo (erro de estado?), pega o último para não perder o registro
     const { data: last } = await supabase
         .from('wake_periods')
         .select('id')
@@ -110,9 +123,14 @@ export async function getEngramNodes(characterId: string): Promise<EngramNode[]>
         
         if (error) throw error;
         
-        // Supabase retorna strings JSON para vetores as vezes, garantir parse se necessário
-        // Mas a extensão pgvector geralmente retorna array de numeros direto no JS client atual
-        return (data || []) as EngramNode[];
+        // Supabase/pgvector pode retornar embedding como string JSON ou array
+        // Precisamos normalizar para garantir que cosineSimilarity funcione
+        const parsedData = (data || []).map((node: any) => ({
+            ...node,
+            embedding: typeof node.embedding === 'string' ? JSON.parse(node.embedding) : node.embedding
+        }));
+
+        return parsedData as EngramNode[];
     } catch (err) {
         console.error("Engram Fetch Error:", err);
         return [];
@@ -150,12 +168,12 @@ export async function saveAdvancedMemory(
 export async function saveDream(content: string, characterId: string, embedding?: number[]) {
   if (!supabase || !characterId) return;
   try {
-    // Sonhos ocorrem APÓS o encerramento, então precisamos pegar o último período mesmo que fechado
-    const wakePeriodId = await _resolveWakePeriodId(characterId, false);
+    // Sonhos ocorrem APÓS o encerramento, então precisamos forçar a busca pelo último período ('dream' context)
+    const wakePeriodId = await _resolveWakePeriodId(characterId, 'dream');
 
     const payload: any = {
       character_id: characterId,
-      wake_period_id: wakePeriodId, // Adicionado vínculo
+      wake_period_id: wakePeriodId, // Adicionado vínculo correto
       content
     };
     if (embedding) payload.embedding = embedding;
@@ -238,7 +256,7 @@ export const characterService = {
   async saveInteraction(characterId: string, type: 'user_message' | 'ai_response' | 'proactive_call', content: string, soul?: SoulState, embedding?: number[]) {
     if (!supabase) return;
     
-    const wakePeriodId = await _resolveWakePeriodId(characterId);
+    const wakePeriodId = await _resolveWakePeriodId(characterId, 'interaction');
     
     const payload: any = {
       character_id: characterId,
@@ -262,7 +280,7 @@ export const characterService = {
   async saveThought(characterId: string, content: string, soul: SoulState, embedding?: number[]) {
     if (!supabase) return;
     
-    const wakePeriodId = await _resolveWakePeriodId(characterId);
+    const wakePeriodId = await _resolveWakePeriodId(characterId, 'interaction');
     
     const payload: any = {
       character_id: characterId,

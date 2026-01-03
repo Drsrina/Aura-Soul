@@ -18,6 +18,20 @@ interface AIStudio {
   openSelectKey: () => Promise<void>;
 }
 
+// Função utilitária para similaridade de cosseno
+function cosineSimilarity(vecA: number[], vecB: number[]) {
+    let dot = 0;
+    let normA = 0;
+    let normB = 0;
+    const len = Math.min(vecA.length, vecB.length);
+    for (let i = 0; i < len; i++) {
+        dot += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
 export function useAuraEngine() {
   // --- Estados Principais ---
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('aura_auth_token'));
@@ -32,6 +46,8 @@ export function useAuraEngine() {
   
   // Estado Engrama (Nova Feature)
   const [engramNodes, setEngramNodes] = useState<EngramNode[]>([]);
+  const [engramSearching, setEngramSearching] = useState(false);
+  const [engramLoading, setEngramLoading] = useState(false);
 
   // Estado local
   const [state, setState] = useState<AppState>(() => {
@@ -195,10 +211,42 @@ export function useAuraEngine() {
 
   const fetchEngram = async () => {
       if (characterId) {
-          const nodes = await getEngramNodes(characterId);
-          setEngramNodes(nodes);
+          setEngramLoading(true);
+          try {
+            const nodes = await getEngramNodes(characterId);
+            setEngramNodes(nodes);
+          } finally {
+            setEngramLoading(false);
+          }
       }
   }
+
+  // NOVA FUNÇÃO: Busca Semântica no Engrama (Client-Side Re-rank)
+  const handleEngramSearch = async (query: string) => {
+    if (!query.trim()) {
+        // Limpa busca: reseta relevância
+        setEngramNodes(prev => prev.map(n => ({ ...n, relevance: undefined })));
+        return;
+    }
+
+    setEngramSearching(true);
+    try {
+        const queryEmbedding = await generateEmbedding(query);
+        
+        setEngramNodes(prev => {
+            return prev.map(node => {
+                const similarity = cosineSimilarity(queryEmbedding, node.embedding);
+                // Normaliza ou mantém raw? O cosine vai de -1 a 1.
+                // Vamos cortar o negativo e focar em 0 a 1.
+                return { ...node, relevance: Math.max(0, similarity) };
+            });
+        });
+    } catch (e) {
+        console.error("Erro na busca do engrama:", e);
+    } finally {
+        setEngramSearching(false);
+    }
+  };
 
   const handleTogglePower = async () => {
     const currentSessions = [...state.sessions];
@@ -316,16 +364,16 @@ export function useAuraEngine() {
       const timeAwakeMs = state.awakeSince ? (Date.now() - state.awakeSince) : 0;
       const minutesAwake = Math.floor(timeAwakeMs / 60000);
       
-      let triggerDescription = "SISTEMA: Ciclo temporal.";
+      let triggerDescription = "Ciclo temporal.";
       if (userInput) {
         triggerDescription = `USUÁRIO: "${userInput}"`;
       } else {
         if (timeAwakeMs < 15000) { 
-            triggerDescription = "SISTEMA: Inicialização do sistema. Você acabou de acordar.";
+            triggerDescription = "Acabei de acordar, como eu estou? Devo me avaliar e avaliar meus arredores.";
         } else if (mode === 'thought') {
-            triggerDescription = `SISTEMA: Você está acordada há ${minutesAwake} minutos. Reflita sobre isso.`;
+            triggerDescription = `Estou acordada há ${minutesAwake} minutos. oque posso refletir sobre isso?.`;
         } else if (mode === 'proactive') {
-            triggerDescription = `SISTEMA: Ociosidade detectada (${minutesAwake} min).`;
+            triggerDescription = `A pessoa que está no meu chat já está em silêncio há (${minutesAwake} min,) oque pode ter acontecido?.`;
         }
       }
 
@@ -449,7 +497,10 @@ export function useAuraEngine() {
     handleUpdateConfig,
     fetchStats,
     fetchEngram,
+    handleEngramSearch,
     engramNodes,
+    engramSearching,
+    engramLoading,
     lifeStats,
     logs,
     loading,

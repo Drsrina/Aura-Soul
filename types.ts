@@ -52,11 +52,11 @@ export interface EngramNode {
   content: string;
   embedding: number[]; // Vetor de 768 dimensões
   created_at: string;
-  // Propriedades visuais calculadas no frontend
+  // Propriedades visuais e de busca
+  relevance?: number; // 0 a 1, calculado via busca vetorial no frontend
   x?: number;
   y?: number;
   z?: number;
-  connections?: string[]; // IDs de nós conectados
 }
 
 export interface AppState {

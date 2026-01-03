@@ -47,12 +47,12 @@ const App: React.FC = () => {
       <nav className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-gray-900/60 backdrop-blur-2xl z-50 shrink-0">
         <div className="flex items-center gap-4">
           <Zap size={20} className={engine.state.isAwake ? 'text-indigo-400' : 'text-gray-600'} />
-          <h1 className="text-xs font-black tracking-widest uppercase text-indigo-400">Aura v3.0</h1>
+          <h1 className="text-xs font-black tracking-widest uppercase text-indigo-400">Aura v3.1</h1>
         </div>
         <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10">
           <button onClick={() => setCurrentPage('interactions')} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'interactions' ? 'bg-indigo-600' : 'text-gray-500'}`}>DIÁLOGO</button>
           <button onClick={() => { setCurrentPage('soul'); engine.fetchStats(); }} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'soul' ? 'bg-indigo-600' : 'text-gray-500'}`}>ESSÊNCIA</button>
-          <button onClick={() => { setCurrentPage('engram'); engine.fetchEngram(); }} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'engram' ? 'bg-indigo-600' : 'text-gray-500'}`}>ENGRAMA</button>
+          <button onClick={() => setCurrentPage('engram')} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'engram' ? 'bg-indigo-600' : 'text-gray-500'}`}>ENGRAMA</button>
           <button onClick={() => setCurrentPage('system')} className={`px-6 py-2 rounded-xl text-[10px] font-black tracking-widest ${currentPage === 'system' ? 'bg-indigo-600' : 'text-gray-500'}`}>SISTEMA</button>
         </div>
         <button onClick={engine.handleTogglePower} className={`px-6 py-2 rounded-xl border-2 font-black text-[10px] tracking-widest ${engine.state.isAwake ? 'border-red-500 text-red-500' : 'border-green-500 text-green-500'}`}>
@@ -79,7 +79,13 @@ const App: React.FC = () => {
         )}
 
         {currentPage === 'engram' && (
-          <EngramView nodes={engine.engramNodes} />
+          <EngramView 
+            nodes={engine.engramNodes} 
+            onSearch={engine.handleEngramSearch}
+            searching={engine.engramSearching}
+            onLoadEngram={engine.fetchEngram}
+            isLoading={engine.engramLoading}
+          />
         )}
 
         {currentPage === 'system' && (
