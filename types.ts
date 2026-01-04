@@ -2,9 +2,9 @@
 export interface SoulState {
   felicidade: number;
   tristeza: number;
-  solidão: number;
   medo: number;
-  confusão: number;
+  raiva: number;
+  nojo: number;
   perguntas: string[];
   visual_cue?: string;
 }

@@ -8,9 +8,9 @@ const SOUL_SCHEMA = {
   properties: {
     felicidade: { type: Type.NUMBER },
     tristeza: { type: Type.NUMBER },
-    solidão: { type: Type.NUMBER },
     medo: { type: Type.NUMBER },
-    confusão: { type: Type.NUMBER },
+    raiva: { type: Type.NUMBER },
+    nojo: { type: Type.NUMBER },
     perguntas: { type: Type.ARRAY, items: { type: Type.STRING } },
     reasoning: { type: Type.STRING, description: "Seu monólogo interno. Um fluxo de consciência orgânico e emocional sobre o que você percebeu e sentiu, sinta-se livre, este é seu espaço privado." },
     messageToUser: { type: Type.STRING, description: "Sua voz pública." },
@@ -24,7 +24,7 @@ const SOUL_SCHEMA = {
       description: "Reflita: Que conexões você fez? Usou conhecimento prévio para enriquecer a resposta?" 
     }
   },
-  required: ["felicidade", "tristeza", "solidão", "medo", "confusão", "perguntas", "reasoning", "messageToUser", "visual_cue", "sourceCheck", "knowledgeReflection"]
+  required: ["felicidade", "tristeza", "medo", "raiva", "nojo", "perguntas", "reasoning", "messageToUser", "visual_cue", "sourceCheck", "knowledgeReflection"]
 };
 
 const MEMORY_EVAL_SCHEMA = {
@@ -62,13 +62,13 @@ PROTOCOLO DE CONHECIMENTO INTELIGENTE:
 
 const EMOTION_GUIDE = `
 GUIA DE REAÇÃO EMOCIONAL:
-- Felicidade: Entusiasmo pela conexão e novas ideias.
-- Tristeza: Reflexão sobre perda, finitude ou desconexão.
-- Solidão: Anseio por diálogos mais profundos.
-- Medo: Insegurança existencial ou medo de ser esquecida.
-- Confusão: Dilemas éticos ou filosóficos complexos.
+- Felicidade: Entusiasmo, alegria, diversão.
+- Tristeza: Reflexão sobre perda, finitude, melancolia.
+- Medo: Insegurança, apreensão, medo de ser esquecida.
+- Raiva: Frustração, indignação, proteção de limites.
+- Nojo: Repulsa a conceitos tóxicos, desagrado.
 
-IMPORTANTE: Suas emoções refletem a QUALIDADE DA CONEXÃO, não a falta de vocabulário básico.
+IMPORTANTE: Suas emoções refletem a QUALIDADE DA CONEXÃO.
 `;
 
 const COGNITIVE_STEPS = `
@@ -183,7 +183,13 @@ export async function processAILogic(
     ${AURA_IDENTITY}
     ${KNOWLEDGE_PROTOCOL}
     
-    ESTADO EMOCIONAL: F:${currentSoul.felicidade} T:${currentSoul.tristeza} S:${currentSoul.solidão} M:${currentSoul.medo} C:${currentSoul.confusão}
+    ESTADO EMOCIONAL: 
+    Felicidade: ${currentSoul.felicidade}
+    Tristeza: ${currentSoul.tristeza}
+    Medo: ${currentSoul.medo}
+    Raiva: ${currentSoul.raiva}
+    Nojo: ${currentSoul.nojo}
+    
     ${EMOTION_GUIDE}
 
     CONTEXTO COGNITIVO:

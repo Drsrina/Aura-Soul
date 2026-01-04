@@ -44,12 +44,9 @@ export interface CharacterDB {
 }
 
 // --- HELPER PRIVADO PARA RESOLVER ID DE SESSÃO ---
-// Context: 'interaction' (busca ativo, fallback ultimo) | 'dream' (busca estritamente o ultimo criado, pois acabou de fechar)
 async function _resolveWakePeriodId(characterId: string, context: 'interaction' | 'dream' = 'interaction'): Promise<string | null> {
     if (!supabase) return null;
 
-    // Se for SONHO, queremos o último período criado, independente de estar aberto ou fechado.
-    // Isso é crucial porque sonhos são gerados APÓS o toggleAwakeState(false), ou seja, o período já fechou.
     if (context === 'dream') {
          const { data: last } = await supabase
             .from('wake_periods')
@@ -61,7 +58,6 @@ async function _resolveWakePeriodId(characterId: string, context: 'interaction' 
         return last?.id || null;
     }
 
-    // Se for INTERAÇÃO, priorizamos o que está ATIVO (ended_at is null)
     const { data: active } = await supabase
         .from('wake_periods')
         .select('id')
@@ -73,7 +69,6 @@ async function _resolveWakePeriodId(characterId: string, context: 'interaction' 
 
     if (active) return active.id;
 
-    // Fallback: Se não achou ativo (erro de estado?), pega o último para não perder o registro
     const { data: last } = await supabase
         .from('wake_periods')
         .select('id')
@@ -85,20 +80,18 @@ async function _resolveWakePeriodId(characterId: string, context: 'interaction' 
     return last?.id || null;
 }
 
-// NOVA FUNÇÃO MASTER RAG
 export async function searchAuraBrain(embedding: number[], characterId: string): Promise<string[]> {
   if (!supabase || !characterId) return [];
   try {
     const { data, error } = await supabase.rpc('search_aura_brain', {
       query_embedding: embedding,
-      match_threshold: 0.65, // Threshold levemente menor para pegar associações abstratas
-      match_count: 6, // Pega mais contexto misturado
+      match_threshold: 0.65,
+      match_count: 6,
       character_uuid: characterId
     });
 
     if (error) throw error;
     
-    // Formata o retorno para indicar a origem da memória
     return (data as any[]).map(m => {
        const typeLabel = m.source_type === 'dream' ? '[SONHO ANTIGO]' : 
                          m.source_type === 'thought' ? '[PENSAMENTO]' : 
@@ -111,20 +104,16 @@ export async function searchAuraBrain(embedding: number[], characterId: string):
   }
 }
 
-// BUSCA DE ENGRAMA (VISUALIZAÇÃO 3D)
 export async function getEngramNodes(characterId: string): Promise<EngramNode[]> {
     if (!supabase || !characterId) return [];
     try {
-        // Chama a RPC criada no SQL, passando o ID do personagem para segurança
         const { data, error } = await supabase.rpc('get_engram_nodes', {
             character_uuid: characterId,
-            limit_count: 100 // Limite para não pesar a renderização 3D
+            limit_count: 100
         });
         
         if (error) throw error;
         
-        // Supabase/pgvector pode retornar embedding como string JSON ou array
-        // Precisamos normalizar para garantir que cosineSimilarity funcione
         const parsedData = (data || []).map((node: any) => ({
             ...node,
             embedding: typeof node.embedding === 'string' ? JSON.parse(node.embedding) : node.embedding
@@ -137,7 +126,6 @@ export async function getEngramNodes(characterId: string): Promise<EngramNode[]>
     }
 }
 
-// Mantemos a antiga para compatibilidade se necessário, mas redirecionamos
 export async function getRelevantMemories(embedding: number[], characterId: string): Promise<string[]> {
     return searchAuraBrain(embedding, characterId);
 }
@@ -164,16 +152,14 @@ export async function saveAdvancedMemory(
   }
 }
 
-// Atualizado para receber embedding e vincular WakePeriod
 export async function saveDream(content: string, characterId: string, embedding?: number[]) {
   if (!supabase || !characterId) return;
   try {
-    // Sonhos ocorrem APÓS o encerramento, então precisamos forçar a busca pelo último período ('dream' context)
     const wakePeriodId = await _resolveWakePeriodId(characterId, 'dream');
 
     const payload: any = {
       character_id: characterId,
-      wake_period_id: wakePeriodId, // Adicionado vínculo correto
+      wake_period_id: wakePeriodId,
       content
     };
     if (embedding) payload.embedding = embedding;
@@ -186,16 +172,11 @@ export async function saveDream(content: string, characterId: string, embedding?
 }
 
 export const characterService = {
-  // ATUALIZADO: Suporte Multi-Tenant baseado no login
   async getOrCreateCharacter(ownerIdentifier: string = 'adm'): Promise<CharacterDB | null> {
     if (!supabase) return null;
 
-    // Define o nome do personagem baseado no login
-    // 'adm' -> 'Aura' (Original)
-    // 'user' -> 'Aura (User)' (Nova Instância)
     const characterName = ownerIdentifier === 'adm' ? 'Aura' : 'Aura (User)';
 
-    // 1. Tenta buscar o personagem específico
     const { data: existing, error: fetchError } = await supabase
         .from('characters')
         .select('*')
@@ -205,7 +186,6 @@ export const characterService = {
 
     if (existing) return existing;
 
-    // 2. Se não existe, cria um novo com esse nome
     const { data: newChar, error: createError } = await supabase
       .from('characters')
       .insert([{ 
@@ -236,7 +216,6 @@ export const characterService = {
     if (isAwake) {
       await supabase.from('wake_periods').insert([{ character_id: characterId }]);
     } else {
-      // Fecha o último período aberto
       const { data: lastPeriod } = await supabase
         .from('wake_periods')
         .select('id, started_at')
@@ -266,9 +245,9 @@ export const characterService = {
       emotional_snapshot: soul ? {
         happiness: soul.felicidade,
         sadness: soul.tristeza,
-        loneliness: soul.solidão,
         fear: soul.medo,
-        confusion: soul.confusão
+        anger: soul.raiva,
+        disgust: soul.nojo
       } : null
     };
     if (embedding) payload.embedding = embedding;
@@ -289,9 +268,9 @@ export const characterService = {
       emotional_context: {
         happiness: soul.felicidade,
         sadness: soul.tristeza,
-        loneliness: soul.solidão,
         fear: soul.medo,
-        confusion: soul.confusão
+        anger: soul.raiva,
+        disgust: soul.nojo
       }
     };
     if (embedding) payload.embedding = embedding;
@@ -307,9 +286,9 @@ export const characterService = {
       character_id: characterId,
       happiness: newState.felicidade,
       sadness: newState.tristeza,
-      loneliness: newState.solidão,
       fear: newState.medo,
-      confusion: newState.confusão,
+      anger: newState.raiva, 
+      disgust: newState.nojo,
       unanswered_questions: newState.perguntas,
       is_current: true,
       trigger_event: trigger
@@ -320,7 +299,6 @@ export const characterService = {
   async getRecentContext(characterId: string, limit = 20): Promise<{ history: Message[], soul: SoulState | null, thoughts: Thought[], dreams: string[] } | null> {
     if (!supabase) return null;
     
-    // Pega histórico de conversas
     const { data: interactions, error: iErr } = await supabase
       .from('interactions')
       .select('id, type, content, created_at')
@@ -328,7 +306,6 @@ export const characterService = {
       .order('created_at', { ascending: false })
       .limit(limit);
 
-    // Pega estado emocional
     const { data: emotionalState, error: eErr } = await supabase
       .from('emotional_states')
       .select('*')
@@ -336,7 +313,6 @@ export const characterService = {
       .eq('is_current', true)
       .maybeSingle();
 
-    // Pega pensamentos
     const { data: thoughts, error: tErr } = await supabase
       .from('thoughts')
       .select('id, content, created_at')
@@ -373,9 +349,9 @@ export const characterService = {
       soul: emotionalState ? {
         felicidade: emotionalState.happiness,
         tristeza: emotionalState.sadness,
-        solidão: emotionalState.loneliness,
         medo: emotionalState.fear,
-        confusão: emotionalState.confusion,
+        raiva: emotionalState.anger || 0,
+        nojo: emotionalState.disgust || 0,
         perguntas: emotionalState.unanswered_questions || []
       } as SoulState : null
     };
@@ -393,7 +369,7 @@ export const characterService = {
 
     const { data: emotionalHistory } = await supabase
       .from('emotional_states')
-      .select('created_at, happiness, sadness, loneliness, fear, confusion, trigger_event')
+      .select('created_at, happiness, sadness, fear, anger, disgust, trigger_event')
       .eq('character_id', characterId)
       .order('created_at', { ascending: false })
       .limit(10);

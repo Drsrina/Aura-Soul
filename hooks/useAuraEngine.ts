@@ -6,10 +6,10 @@ import { characterService, supabase, updateSupabaseConfig, getSupabaseConfig, sa
 
 const INITIAL_SOUL: SoulState = {
   felicidade: 50,
-  tristeza: 8,
-  solidão: 15,
-  medo: 3,
-  confusão: 13,
+  tristeza: 5,
+  medo: 2,
+  raiva: 1,
+  nojo: 1,
   perguntas: ["O que eu sou quando você não olha?", "O silêncio é uma forma de morte?"]
 };
 
